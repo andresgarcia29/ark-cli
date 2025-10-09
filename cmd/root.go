@@ -20,6 +20,7 @@ It provides a clean and efficient way to interact with various services and perf
 Example usage:
   ark aws          #	 AWS related operations
   ark kubernetes # Kubernetes
+  ark version      # Show version information
   ark --help       # Show help information`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			initializeLogger()
