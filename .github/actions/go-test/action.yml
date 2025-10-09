@@ -23,16 +23,6 @@ runs:
         cache: true
         cache-dependency-path: ${{ inputs.working-directory }}/go.sum
 
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
     - name: Get dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
