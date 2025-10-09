@@ -41,7 +41,7 @@ builds:
 
 # Archive configuration
 archives:
-  - id: ark-cli
+  - id: ark
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
@@ -104,6 +104,7 @@ brews:
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
+    directory: Formula
     homepage: https://github.com/andresgarcia29/ark-cli
     description: A powerful CLI tool for AWS and Kubernetes operations
     license: MIT
