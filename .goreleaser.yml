@@ -91,6 +91,25 @@ release:
   footer: |
     **Full Changelog**: https://github.com/andresgarcia29/ark-cli/compare/{{ .PreviousTag }}...{{ .Tag }}
 
+# Homebrew tap configuration
+brews:
+  - name: ark-cli
+    repository:
+      owner: andresgarcia29
+      name: homebrew-agm
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    folder: Formula
+    homepage: https://github.com/andresgarcia29/ark-cli
+    description: A powerful CLI tool for AWS and Kubernetes operations
+    license: MIT
+    test: |
+      system "#{bin}/ark", "--version"
+    install: |
+      bin.install "ark"
+
 # Metadata
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
