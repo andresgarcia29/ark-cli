@@ -7,7 +7,7 @@ inputs:
   goreleaser-version:
     description: 'GoReleaser version to use'
     required: false
-    default: 'latest'
+    default: '~> v2'
   release-notes:
     description: 'Custom release notes'
     required: false
