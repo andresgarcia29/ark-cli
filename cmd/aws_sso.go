@@ -25,7 +25,9 @@ func init() {
 	awsCmd.AddCommand(awsSSOnCmd)
 	awsSSOnCmd.Flags().StringVar(&SSORegion, "region", "us-east-1", "AWS SSO region")
 	awsSSOnCmd.Flags().StringVar(&SSOStartURL, "start-url", "", "AWS SSO start URL (required)")
-	awsSSOnCmd.MarkFlagRequired("start-url")
+	if err := awsSSOnCmd.MarkFlagRequired("start-url"); err != nil {
+		panic(err)
+	}
 }
 
 func awsSSOCommand(cmd *cobra.Command, args []string) {

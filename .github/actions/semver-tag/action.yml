@@ -29,12 +29,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ inputs.github-token }}
-
     - name: Get latest tag
       id: get-latest-tag
       shell: bash

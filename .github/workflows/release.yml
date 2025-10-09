@@ -42,6 +42,12 @@ jobs:
       previous-tag: ${{ steps.semver.outputs.previous-tag }}
       bump: ${{ steps.semver.outputs.bump }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+
       - name: Create semantic version tag
         id: semver
         uses: ./.github/actions/semver-tag

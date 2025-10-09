@@ -26,7 +26,9 @@ func init() {
 	awsCmd.AddCommand(awsLoginnCmd)
 	awsLoginnCmd.Flags().StringVar(&LoginProfile, "profile", "", "AWS profile name to login with")
 	awsLoginnCmd.Flags().BoolVar(&SetAsDefault, "set-default", false, "Set this profile as default")
-	awsLoginnCmd.MarkFlagRequired("profile")
+	if err := awsLoginnCmd.MarkFlagRequired("profile"); err != nil {
+		panic(err)
+	}
 }
 
 func awsLoginCommand(cmd *cobra.Command, args []string) {

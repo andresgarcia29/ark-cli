@@ -120,15 +120,15 @@ func parseINIFile(content string) map[string]map[string]string {
 func writeCredentialSection(builder *strings.Builder, creds map[string]string) {
 	// Orden específico para las credenciales
 	if val, ok := creds["aws_access_key_id"]; ok {
-		builder.WriteString(fmt.Sprintf("aws_access_key_id = %s\n", val))
+		fmt.Fprintf(builder, "aws_access_key_id = %s\n", val)
 	}
 	if val, ok := creds["aws_secret_access_key"]; ok {
-		builder.WriteString(fmt.Sprintf("aws_secret_access_key = %s\n", val))
+		fmt.Fprintf(builder, "aws_secret_access_key = %s\n", val)
 	}
 	if val, ok := creds["aws_session_token"]; ok {
-		builder.WriteString(fmt.Sprintf("aws_session_token = %s\n", val))
+		fmt.Fprintf(builder, "aws_session_token = %s\n", val)
 	}
 	if val, ok := creds["expiration"]; ok {
-		builder.WriteString(fmt.Sprintf("expiration = %s\n", val))
+		fmt.Fprintf(builder, "expiration = %s\n", val)
 	}
 }
