@@ -148,7 +148,7 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	return profileConfig, nil
 }
 
-// ReadAllProfilesFromConfig lee todos los perfiles de SSO del archivo ~/.aws/config
+// ReadAllProfilesFromConfig lee todos los perfiles del archivo ~/.aws/config
 func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -171,8 +171,14 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 
 		// Detectar inicio de perfil
 		if strings.HasPrefix(line, "[profile ") && strings.HasSuffix(line, "]") {
-			// Guardar el perfil anterior si existe
-			if currentProfile != nil && currentProfile.AccountID != "" {
+			// Guardar el perfil anterior si existe y es válido
+			if currentProfile != nil && (currentProfile.AccountID != "" || currentProfile.RoleARN != "") {
+				// Determinar el tipo de perfil
+				if currentProfile.RoleARN != "" {
+					currentProfile.ProfileType = ProfileTypeAssumeRole
+				} else if currentProfile.StartURL != "" {
+					currentProfile.ProfileType = ProfileTypeSSO
+				}
 				profiles = append(profiles, *currentProfile)
 			}
 
@@ -201,13 +207,25 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 					currentProfile.RoleName = value
 				case "region":
 					currentProfile.Region = value
+				case "role_arn":
+					currentProfile.RoleARN = value
+				case "source_profile":
+					currentProfile.SourceProfile = value
+				case "external_id":
+					currentProfile.ExternalID = value
 				}
 			}
 		}
 	}
 
-	// Agregar el último perfil
-	if currentProfile != nil && currentProfile.AccountID != "" {
+	// Agregar el último perfil si es válido
+	if currentProfile != nil && (currentProfile.AccountID != "" || currentProfile.RoleARN != "") {
+		// Determinar el tipo de perfil
+		if currentProfile.RoleARN != "" {
+			currentProfile.ProfileType = ProfileTypeAssumeRole
+		} else if currentProfile.StartURL != "" {
+			currentProfile.ProfileType = ProfileTypeSSO
+		}
 		profiles = append(profiles, *currentProfile)
 	}
 
