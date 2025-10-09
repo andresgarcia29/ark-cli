@@ -93,7 +93,7 @@ release:
 
 # Homebrew tap configuration
 homebrew_casks:
-  - name: ark-cli
+  - name: ark
     ids:
       - ark
     repository:
@@ -107,7 +107,6 @@ homebrew_casks:
     homepage: https://github.com/andresgarcia29/ark-cli
     description: A powerful CLI tool for AWS and Kubernetes operations
     license: MIT
-    binary: ark
 
 # Metadata
 metadata:
