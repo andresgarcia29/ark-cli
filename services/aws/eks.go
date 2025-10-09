@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 )
 
-// ListClusters lista todos los clusters de EKS en la región configurada
+// ListClusters lists all EKS clusters in the configured region
 func (e *EKSClient) ListClusters(ctx context.Context) ([]string, error) {
 	var clusters []string
 	var nextToken *string
@@ -28,7 +28,7 @@ func (e *EKSClient) ListClusters(ctx context.Context) ([]string, error) {
 
 		clusters = append(clusters, output.Clusters...)
 
-		// Si no hay más páginas, terminar
+		// If there are no more pages, finish
 		if output.NextToken == nil {
 			break
 		}
@@ -38,7 +38,7 @@ func (e *EKSClient) ListClusters(ctx context.Context) ([]string, error) {
 	return clusters, nil
 }
 
-// GetClustersForAccountRegion obtiene todos los clusters para una cuenta y región específica
+// GetClustersForAccountRegion gets all clusters for a specific account and region
 func GetClustersForAccountRegion(ctx context.Context, profile, accountID, region string) ([]EKSCluster, error) {
 	// Crear cliente EKS
 	eksClient, err := NewEKSClient(ctx, region, profile)
@@ -66,40 +66,40 @@ func GetClustersForAccountRegion(ctx context.Context, profile, accountID, region
 	return clusters, nil
 }
 
-// GetClustersForAccountMultiRegion obtiene todos los clusters para una cuenta en múltiples regiones
-// VERSIÓN OPTIMIZADA: Paraleliza la búsqueda en múltiples regiones simultáneamente
+// GetClustersForAccountMultiRegion gets all clusters for an account in multiple regions
+// OPTIMIZED VERSION: Parallelizes the search across multiple regions simultaneously
 func GetClustersForAccountMultiRegion(ctx context.Context, profile, accountID string, regions []string) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
-	// Si no hay regiones, retornamos lista vacía
+	// If there are no regions, return empty list
 	if len(regions) == 0 {
 		return []EKSCluster{}, nil
 	}
 
-	// Si solo hay una región, no necesitamos paralelización
+	// If there's only one region, we don't need parallelization
 	if len(regions) == 1 {
 		return GetClustersForAccountRegion(ctx, profile, accountID, regions[0])
 	}
 
-	logger.Infow("Escaneando regiones en paralelo",
+	logger.Infow("Scanning regions in parallel",
 		"total_regions", len(regions),
 		"account_id", accountID)
 
-	// Configuración para paralelización
+	// Configuration for parallelization
 	config := lib.ConservativeConfig()
 
-	// Usamos nuestra función especializada para procesar regiones en paralelo
-	// Esta función maneja automáticamente:
-	// - Control de concurrencia (máximo 10 regiones simultáneas)
-	// - Timeouts para evitar cuelgues
-	// - Recolección de resultados desde channels
-	// - Manejo de errores parciales
+	// Use our specialized function to process regions in parallel
+	// This function automatically handles:
+	// - Concurrency control (maximum 10 simultaneous regions)
+	// - Timeouts to prevent hangs
+	// - Result collection from channels
+	// - Partial error handling
 	allClusters, err := ProcessRegionsInParallel(ctx, profile, accountID, regions, config)
 	if err != nil {
-		return nil, fmt.Errorf("error procesando regiones para cuenta %s: %w", accountID, err)
+		return nil, fmt.Errorf("error processing regions for account %s: %w", accountID, err)
 	}
 
-	logger.Infow("Clusters encontrados en múltiples regiones",
+	logger.Infow("Clusters found in multiple regions",
 		"account_id", accountID,
 		"total_clusters", len(allClusters),
 		"regions_scanned", len(regions))
@@ -107,44 +107,44 @@ func GetClustersForAccountMultiRegion(ctx context.Context, profile, accountID st
 	return allClusters, nil
 }
 
-// GetClustersFromAllAccounts obtiene clusters de todas las cuentas en las regiones especificadas
-// VERSIÓN OPTIMIZADA: Paraleliza el procesamiento de múltiples cuentas AWS
+// GetClustersFromAllAccounts gets clusters from all accounts in the specified regions
+// OPTIMIZED VERSION: Parallelizes the processing of multiple AWS accounts
 func GetClustersFromAllAccounts(ctx context.Context, regions []string) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
-	// Si no se especifican regiones, usar default
+	// If no regions are specified, use default
 	if len(regions) == 0 {
 		regions = []string{"us-west-2"}
 	}
 
-	// Paso 1: Leer todos los perfiles
-	logger.Info("Leyendo perfiles desde ~/.aws/config")
+	// Step 1: Read all profiles
+	logger.Info("Reading profiles from ~/.aws/config")
 	allProfiles, err := ReadAllProfilesFromConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read profiles: %w", err)
 	}
 
-	// Paso 2: Seleccionar un perfil por cuenta (priorizando ReadOnly)
+	// Step 2: Select one profile per account (prioritizing ReadOnly)
 	selectedProfiles := SelectProfilesPerAccount(allProfiles)
-	logger.Infow("Cuentas encontradas para escanear",
+	logger.Infow("Accounts found to scan",
 		"total_accounts", len(selectedProfiles))
 
 	if len(selectedProfiles) == 0 {
-		logger.Warn("No se encontraron cuentas para procesar")
+		logger.Warn("No accounts found to process")
 		return []EKSCluster{}, nil
 	}
 
-	// Si solo hay una cuenta, no necesitamos paralelización
+	// If there's only one account, we don't need parallelization
 	if len(selectedProfiles) == 1 {
 		for accountID, profile := range selectedProfiles {
 			return processAccount(ctx, accountID, profile, regions)
 		}
 	}
 
-	// Configuración para paralelización
+	// Configuration for parallelization
 	config := lib.ConservativeConfig()
 
-	// Convertir el mapa de perfiles a una lista de IDs de cuenta
+	// Convert the profile map to a list of account IDs
 	var accountIDs []string
 	profileMap := make(map[string]ProfileConfig)
 	for accountID, profile := range selectedProfiles {
@@ -152,48 +152,48 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string) ([]EKSClu
 		profileMap[accountID] = profile
 	}
 
-	logger.Infow("Procesando cuentas en paralelo",
+	logger.Infow("Processing accounts in parallel",
 		"total_accounts", len(accountIDs),
 		"max_workers", config.MaxWorkers)
 
-	// Paso 3: Usar paralelización para procesar todas las cuentas
-	// Esta función ejecutará el login y obtención de clusters para cada cuenta simultáneamente
+	// Step 3: Use parallelization to process all accounts
+	// This function will execute login and cluster retrieval for each account simultaneously
 	accountResults, errors := lib.ProcessAccountsInParallel(
 		ctx,
 		accountIDs,
 		config,
-		// Esta función se ejecuta para cada cuenta en paralelo
+		// This function executes for each account in parallel
 		func(ctx context.Context, accountID string) ([]EKSCluster, error) {
-			// Obtenemos la información del perfil para esta cuenta
+			// Get the profile information for this account
 			profile, exists := profileMap[accountID]
 			if !exists {
-				return nil, fmt.Errorf("no se encontró perfil para cuenta %s", accountID)
+				return nil, fmt.Errorf("profile not found for account %s", accountID)
 			}
 
-			// Procesamos esta cuenta (login + obtener clusters)
+			// Process this account (login + get clusters)
 			return processAccount(ctx, accountID, profile, regions)
 		},
 	)
 
-	// Reportar errores pero continuar con los resultados exitosos
+	// Report errors but continue with successful results
 	if len(errors) > 0 {
-		logger.Warnw("Algunas cuentas tuvieron errores",
+		logger.Warnw("Some accounts had errors",
 			"error_count", len(errors))
 		for _, err := range errors {
 			logger.Warnf("  - %v", err)
 		}
 	}
 
-	// Combinar todos los clusters de todas las cuentas exitosas
+	// Combine all clusters from all successful accounts
 	var allClusters []EKSCluster
 	for accountID, clusters := range accountResults {
 		allClusters = append(allClusters, clusters...)
-		logger.Infow("Cuenta contribuyó con clusters",
+		logger.Infow("Account contributed clusters",
 			"account_id", accountID,
 			"clusters_count", len(clusters))
 	}
 
-	logger.Infow("Procesamiento paralelo completado",
+	logger.Infow("Parallel processing completed",
 		"total_clusters", len(allClusters),
 		"successful_accounts", len(accountResults),
 		"failed_accounts", len(errors))
@@ -201,28 +201,28 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string) ([]EKSClu
 	return allClusters, nil
 }
 
-// processAccount procesa una cuenta específica: hace login y obtiene todos los clusters
-// Esta función está separada para facilitar la paralelización y el testing
+// processAccount processes a specific account: logs in and gets all clusters
+// This function is separated to facilitate parallelization and testing
 func processAccount(ctx context.Context, accountID string, profile ProfileConfig, regions []string) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
-	logger.Infow("Procesando cuenta",
+	logger.Infow("Processing account",
 		"account_id", accountID,
 		"profile", profile.ProfileName,
 		"role", profile.RoleName)
 
-	// Paso 1: Login con el perfil (sin set-default para evitar conflictos en paralelo)
-	logger.Debugw("Realizando login",
+	// Step 1: Login with profile (without set-default to avoid conflicts in parallel)
+	logger.Debugw("Performing login",
 		"profile", profile.ProfileName)
 	if err := LoginWithProfile(ctx, profile.ProfileName, false); err != nil {
 		return nil, fmt.Errorf("failed to login with profile %s: %w", profile.ProfileName, err)
 	}
-	logger.Infow("Login exitoso",
+	logger.Infow("Login successful",
 		"profile", profile.ProfileName)
 
-	// Paso 2: Obtener clusters en todas las regiones especificadas
-	// Esta función ya está paralelizada para manejar múltiples regiones simultáneamente
-	logger.Debugw("Escaneando regiones",
+	// Step 2: Get clusters in all specified regions
+	// This function is already parallelized to handle multiple regions simultaneously
+	logger.Debugw("Scanning regions",
 		"regions", regions)
 	clusters, err := GetClustersForAccountMultiRegion(ctx, profile.ProfileName, accountID, regions)
 	if err != nil {
@@ -230,11 +230,11 @@ func processAccount(ctx context.Context, accountID string, profile ProfileConfig
 	}
 
 	if len(clusters) > 0 {
-		logger.Infow("Clusters encontrados",
+		logger.Infow("Clusters found",
 			"account_id", accountID,
 			"clusters_count", len(clusters))
 	} else {
-		logger.Infow("No se encontraron clusters",
+		logger.Infow("No clusters found",
 			"account_id", accountID)
 	}
 

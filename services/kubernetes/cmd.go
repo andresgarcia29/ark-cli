@@ -9,7 +9,7 @@ import (
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 )
 
-// UpdateKubeconfigForCluster ejecuta aws eks update-kubeconfig para un cluster específico
+// UpdateKubeconfigForCluster executes aws eks update-kubeconfig for a specific cluster
 func UpdateKubeconfigForCluster(cluster services_aws.EKSCluster, replaceProfile string) error {
 	if replaceProfile != "" {
 		cluster.Profile = replaceProfile
@@ -36,33 +36,33 @@ func UpdateKubeconfigForCluster(cluster services_aws.EKSCluster, replaceProfile 
 	return nil
 }
 
-// UpdateKubeconfigForAllClusters actualiza kubeconfig para todos los clusters
+// UpdateKubeconfigForAllClusters updates kubeconfig for all clusters
 func UpdateKubeconfigForAllClusters(clusters []services_aws.EKSCluster, replaceProfile string) error {
 	logger := logs.GetLogger()
 
 	if len(clusters) == 0 {
-		logger.Info("No hay clusters para configurar")
+		logger.Info("No clusters to configure")
 		return nil
 	}
 
-	logger.Infof("Configurando %d cluster(s)", len(clusters))
+	logger.Infof("Configuring %d cluster(s)", len(clusters))
 
 	var errors []error
 	successCount := 0
 
 	for _, cluster := range clusters {
-		logger.Infof("Configurando cluster: %s (cuenta: %s, región: %s)",
+		logger.Infof("Configuring cluster: %s (account: %s, region: %s)",
 			cluster.Name, cluster.AccountID, cluster.Region)
 
 		if err := UpdateKubeconfigForCluster(cluster, replaceProfile); err != nil {
-			logger.Errorw("Error configurando cluster",
+			logger.Errorw("Error configuring cluster",
 				"cluster", cluster.Name,
 				"account", cluster.AccountID,
 				"region", cluster.Region,
 				"error", err)
 			errors = append(errors, fmt.Errorf("cluster %s: %w", cluster.Name, err))
 		} else {
-			logger.Infow("Cluster configurado exitosamente",
+			logger.Infow("Cluster configured successfully",
 				"cluster", cluster.Name,
 				"account", cluster.AccountID,
 				"region", cluster.Region)
@@ -70,22 +70,22 @@ func UpdateKubeconfigForAllClusters(clusters []services_aws.EKSCluster, replaceP
 		}
 	}
 
-	// Reportamos estadísticas finales
-	logger.Infow("Configuración completada",
-		"exitosos", successCount,
-		"fallidos", len(errors),
+	// Report final statistics
+	logger.Infow("Configuration completed",
+		"successful", successCount,
+		"failed", len(errors),
 		"total", len(clusters))
 
 	if len(errors) > 0 {
-		logger.Warn("Se encontraron errores durante la configuración:")
+		logger.Warn("Errors found during configuration:")
 		for _, err := range errors {
 			logger.Warnf("  - %v", err)
 		}
 	}
 
-	// Solo consideramos la operación como fallida si TODOS los clusters fallaron
+	// We only consider the operation as failed if ALL clusters failed
 	if len(errors) > 0 && successCount == 0 {
-		return fmt.Errorf("la configuración falló para todos los %d clusters", len(errors))
+		return fmt.Errorf("configuration failed for all %d clusters", len(errors))
 	}
 
 	return nil

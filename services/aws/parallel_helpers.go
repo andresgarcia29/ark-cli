@@ -9,19 +9,19 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// RegionResult representa el resultado de procesar una región específica
+// RegionResult represents the result of processing a specific region
 type RegionResult struct {
-	// Region identifica qué región se procesó
+	// Region identifies which region was processed
 	Region string
-	// AccountID identifica a qué cuenta pertenece esta región
+	// AccountID identifies which account this region belongs to
 	AccountID string
-	// Clusters contiene los clusters encontrados en esta región
+	// Clusters contains the clusters found in this region
 	Clusters []EKSCluster
-	// Error contiene cualquier error que ocurrió durante el procesamiento
+	// Error contains any error that occurred during processing
 	Error error
 }
 
-// ProcessRegionsInParallel procesa múltiples regiones en paralelo para una cuenta específica
+// ProcessRegionsInParallel processes multiple regions in parallel for a specific account
 func ProcessRegionsInParallel(
 	ctx context.Context,
 	profile, accountID string,
@@ -30,37 +30,37 @@ func ProcessRegionsInParallel(
 ) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
-	// Creamos contexto con timeout
+	// Create context with timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	// Channel para recibir resultados de cada región
+	// Channel to receive results from each region
 	resultChan := make(chan RegionResult, len(regions))
 
 	workerPool := lib.NewWorkerPool(config.MaxWorkers)
 
-	logger.Infow("Escaneando regiones en paralelo",
+	logger.Infow("Scanning regions in parallel",
 		"total_regions", len(regions),
 		"account_id", accountID)
 
-	// Lanzamos una goroutine para cada región
+	// Launch a goroutine for each region
 	for _, region := range regions {
 		wg.Add(1)
-		currentRegion := region // Capturar variable para closure
+		currentRegion := region // Capture variable for closure
 
 		go func() {
 			defer wg.Done()
 
-			logger.Debugw("Buscando clusters en región",
+			logger.Debugw("Searching for clusters in region",
 				"region", currentRegion,
 				"account_id", accountID)
 
 			err := workerPool.Execute(timeoutCtx, func() error {
-				// Obtenemos clusters para esta región específica
+				// Get clusters for this specific region
 				clusters, err := GetClustersForAccountRegion(timeoutCtx, profile, accountID, currentRegion)
 
-				// Enviamos el resultado al channel
+				// Send the result to the channel
 				select {
 				case resultChan <- RegionResult{
 					Region:    currentRegion,
@@ -69,12 +69,12 @@ func ProcessRegionsInParallel(
 					Error:     err,
 				}:
 					if err != nil {
-						logger.Errorw("Error escaneando región",
+						logger.Errorw("Error scanning region",
 							"region", currentRegion,
 							"account_id", accountID,
 							"error", err)
 					} else {
-						logger.Infow("Región escaneada exitosamente",
+						logger.Infow("Region scanned successfully",
 							"region", currentRegion,
 							"account_id", accountID,
 							"clusters_found", len(clusters))
@@ -85,7 +85,7 @@ func ProcessRegionsInParallel(
 				return nil
 			})
 
-			// Manejar errores del worker pool
+			// Handle worker pool errors
 			if err != nil {
 				select {
 				case resultChan <- RegionResult{
@@ -100,37 +100,37 @@ func ProcessRegionsInParallel(
 		}()
 	}
 
-	// Goroutine para cerrar el channel cuando todas las regiones terminen
+	// Goroutine to close the channel when all regions finish
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Recolectamos resultados
+	// Collect results
 	var allClusters []EKSCluster
 	var hasErrors bool
 
 	for result := range resultChan {
 		if result.Error != nil {
-			logger.Warnw("Región falló durante escaneo",
+			logger.Warnw("Region failed during scan",
 				"region", result.Region,
 				"account_id", accountID,
 				"error", result.Error)
 			hasErrors = true
 		} else {
-			// Agregamos todos los clusters de esta región
+			// Add all clusters from this region
 			allClusters = append(allClusters, result.Clusters...)
 		}
 	}
 
-	// Si todas las regiones fallaron, retornamos error
+	// If all regions failed, return error
 	if hasErrors && len(allClusters) == 0 {
-		logger.Errorw("Todas las regiones fallaron",
+		logger.Errorw("All regions failed",
 			"account_id", accountID)
-		return nil, fmt.Errorf("todas las regiones fallaron para la cuenta %s", accountID)
+		return nil, fmt.Errorf("all regions failed for account %s", accountID)
 	}
 
-	logger.Infow("Escaneo de regiones completado",
+	logger.Infow("Region scan completed",
 		"account_id", accountID,
 		"total_clusters", len(allClusters))
 

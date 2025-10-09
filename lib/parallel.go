@@ -9,175 +9,175 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// ParallelConfig controla los parámetros de paralelización
+// ParallelConfig controls the parallelization parameters
 type ParallelConfig struct {
-	// MaxWorkers define el número máximo de goroutines que pueden ejecutarse simultáneamente
-	// Esto evita sobrecargar las APIs de AWS y el sistema local
+	// MaxWorkers defines the maximum number of goroutines that can execute simultaneously
+	// This prevents overloading AWS APIs and the local system
 	MaxWorkers int
 
-	// Timeout define cuánto tiempo máximo puede tardar toda la operación paralela
-	// Si se supera este tiempo, se cancelan todas las operaciones pendientes
+	// Timeout defines the maximum time the entire parallel operation can take
+	// If this time is exceeded, all pending operations are cancelled
 	Timeout time.Duration
 
-	// RateLimitDelay define el tiempo de espera entre el inicio de cada nueva tarea
-	// Esto ayuda a evitar sobrecargar las APIs de AWS con demasiadas requests simultáneas
+	// RateLimitDelay defines the wait time between the start of each new task
+	// This helps prevent overloading AWS APIs with too many simultaneous requests
 	RateLimitDelay time.Duration
 
-	// MaxRetries define cuántas veces se reintentará una operación fallida
-	// Útil para manejar errores temporales de red o límites de API
+	// MaxRetries defines how many times a failed operation will be retried
+	// Useful for handling temporary network errors or API limits
 	MaxRetries int
 
-	// RetryDelay define cuánto tiempo esperar entre reintentos
+	// RetryDelay defines how long to wait between retries
 	RetryDelay time.Duration
 }
 
-// DefaultParallelConfig devuelve una configuración por defecto optimizada para AWS
+// DefaultParallelConfig returns a default configuration optimized for AWS
 func DefaultParallelConfig() ParallelConfig {
 	return ParallelConfig{
-		MaxWorkers:     10,                     // 10 workers concurrentes - balance entre velocidad y rate limits de AWS
-		Timeout:        5 * time.Minute,        // 5 minutos máximo para operaciones paralelas
-		RateLimitDelay: 100 * time.Millisecond, // 100ms entre tareas para respetar rate limits
-		MaxRetries:     3,                      // 3 reintentos para operaciones fallidas
-		RetryDelay:     1 * time.Second,        // 1 segundo entre reintentos
+		MaxWorkers:     10,                     // 10 concurrent workers - balance between speed and AWS rate limits
+		Timeout:        5 * time.Minute,        // 5 minutes maximum for parallel operations
+		RateLimitDelay: 100 * time.Millisecond, // 100ms between tasks to respect rate limits
+		MaxRetries:     3,                      // 3 retries for failed operations
+		RetryDelay:     1 * time.Second,        // 1 second between retries
 	}
 }
 
-// ConservativeConfig devuelve una configuración más conservadora para ambientes sensibles
+// ConservativeConfig returns a more conservative configuration for sensitive environments
 func ConservativeConfig() ParallelConfig {
 	return ParallelConfig{
-		MaxWorkers:     5,                      // Menos workers para ser más conservador
-		Timeout:        10 * time.Minute,       // Más tiempo para operaciones
-		RateLimitDelay: 500 * time.Millisecond, // Más delay entre requests
-		MaxRetries:     5,                      // Más reintentos
-		RetryDelay:     2 * time.Second,        // Más tiempo entre reintentos
+		MaxWorkers:     5,                      // Fewer workers to be more conservative
+		Timeout:        10 * time.Minute,       // More time for operations
+		RateLimitDelay: 500 * time.Millisecond, // More delay between requests
+		MaxRetries:     5,                      // More retries
+		RetryDelay:     2 * time.Second,        // More time between retries
 	}
 }
 
-// AggressiveConfig devuelve una configuración más agresiva para máximo rendimiento
+// AggressiveConfig returns a more aggressive configuration for maximum performance
 func AggressiveConfig() ParallelConfig {
 	return ParallelConfig{
-		MaxWorkers:     20,                     // Más workers para máximo paralelismo
-		Timeout:        3 * time.Minute,        // Menos tiempo para operaciones
-		RateLimitDelay: 50 * time.Millisecond,  // Menos delay entre requests
-		MaxRetries:     2,                      // Menos reintentos
-		RetryDelay:     500 * time.Millisecond, // Menos tiempo entre reintentos
+		MaxWorkers:     20,                     // More workers for maximum parallelism
+		Timeout:        3 * time.Minute,        // Less time for operations
+		RateLimitDelay: 50 * time.Millisecond,  // Less delay between requests
+		MaxRetries:     2,                      // Fewer retries
+		RetryDelay:     500 * time.Millisecond, // Less time between retries
 	}
 }
 
-// WorkerPool representa un pool de workers para ejecutar tareas en paralelo
+// WorkerPool represents a worker pool for executing tasks in parallel
 type WorkerPool struct {
-	// maxWorkers controla cuántas goroutines pueden ejecutarse simultáneamente
+	// maxWorkers controls how many goroutines can execute simultaneously
 	maxWorkers int
-	// semaphore es un channel que actúa como semáforo para controlar la concurrencia
-	// Cuando está lleno, las nuevas goroutines esperan hasta que se libere espacio
+	// semaphore is a channel that acts as a semaphore to control concurrency
+	// When full, new goroutines wait until space is freed
 	semaphore chan struct{}
 }
 
-// NewWorkerPool crea un nuevo pool de workers con el número máximo especificado
+// NewWorkerPool creates a new worker pool with the specified maximum number
 func NewWorkerPool(maxWorkers int) *WorkerPool {
 	return &WorkerPool{
 		maxWorkers: maxWorkers,
-		// Creamos un channel con capacidad igual al número máximo de workers
-		// Esto actúa como un semáforo: cuando está lleno, las nuevas tareas esperan
+		// Create a channel with capacity equal to the maximum number of workers
+		// This acts as a semaphore: when full, new tasks wait
 		semaphore: make(chan struct{}, maxWorkers),
 	}
 }
 
-// Execute ejecuta una función en el pool de workers
-// Esta función bloquea hasta que hay un worker disponible
+// Execute executes a function in the worker pool
+// This function blocks until a worker is available
 func (wp *WorkerPool) Execute(ctx context.Context, fn func() error) error {
 	select {
-	// Intentamos adquirir un slot en el semáforo
+	// Attempt to acquire a slot in the semaphore
 	case wp.semaphore <- struct{}{}:
-		// ¡Tenemos un slot! Ejecutamos la función
+		// We have a slot! Execute the function
 		defer func() {
-			// Al terminar, liberamos el slot para que otro worker pueda usarlo
+			// When finished, free the slot so another worker can use it
 			<-wp.semaphore
 		}()
 		return fn()
 
-	// Si el contexto se cancela mientras esperamos un slot, retornamos error
+	// If the context is cancelled while waiting for a slot, return error
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// AccountResult representa el resultado de procesar una cuenta específica
+// AccountResult represents the result of processing a specific account
 type AccountResult struct {
-	// AccountID identifica qué cuenta se procesó
+	// AccountID identifies which account was processed
 	AccountID string
-	// Data contiene los datos obtenidos (puede ser []EKSCluster, []Role, etc.)
+	// Data contains the obtained data (can be []EKSCluster, []Role, etc.)
 	Data interface{}
-	// Error contiene cualquier error que ocurrió durante el procesamiento
+	// Error contains any error that occurred during processing
 	Error error
 }
 
-// GetWorkerPool es un alias para NewWorkerPool para facilitar el uso externo
+// GetWorkerPool is an alias for NewWorkerPool to facilitate external use
 func GetWorkerPool(maxWorkers int) *WorkerPool {
 	return NewWorkerPool(maxWorkers)
 }
 
-// ExecuteWithRetry ejecuta una función con reintentos automáticos
-// Esta función es útil para operaciones que pueden fallar temporalmente (red, rate limits, etc.)
+// ExecuteWithRetry executes a function with automatic retries
+// This function is useful for operations that can fail temporarily (network, rate limits, etc.)
 func ExecuteWithRetry(ctx context.Context, config ParallelConfig, operation func() error) error {
 	logger := logs.GetLogger()
 	var lastErr error
 
-	// Intentamos la operación hasta MaxRetries + 1 veces (intento inicial + reintentos)
+	// Attempt the operation up to MaxRetries + 1 times (initial attempt + retries)
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
-		// Si no es el primer intento, esperamos antes de reintentar
+		// If it's not the first attempt, wait before retrying
 		if attempt > 0 {
-			logger.Debugw("Reintentando operación",
+			logger.Debugw("Retrying operation",
 				"attempt", attempt,
 				"max_retries", config.MaxRetries,
 				"delay", config.RetryDelay)
 
-			// Usamos select para respetar el contexto durante la espera
+			// Use select to respect the context during the wait
 			select {
 			case <-time.After(config.RetryDelay):
-				// Tiempo de espera completado, continuamos
+				// Wait time completed, continue
 			case <-ctx.Done():
-				// El contexto fue cancelado, retornamos el error
-				return fmt.Errorf("operación cancelada durante reintento: %w", ctx.Err())
+				// The context was cancelled, return the error
+				return fmt.Errorf("operation cancelled during retry: %w", ctx.Err())
 			}
 		}
 
-		// Ejecutamos la operación
+		// Execute the operation
 		err := operation()
 		if err == nil {
-			// ¡Éxito! No necesitamos más reintentos
+			// Success! No more retries needed
 			if attempt > 0 {
-				logger.Infow("Operación exitosa después de reintentos",
+				logger.Infow("Operation successful after retries",
 					"successful_attempt", attempt+1)
 			}
 			return nil
 		}
 
-		// Guardamos el error para reportarlo si todos los intentos fallan
+		// Save the error to report it if all attempts fail
 		lastErr = err
 
-		// Si es el último intento, no mostramos mensaje de reintento
+		// If it's the last attempt, don't show retry message
 		if attempt < config.MaxRetries {
-			logger.Warnw("Intento falló, reintentando",
+			logger.Warnw("Attempt failed, retrying",
 				"attempt", attempt+1,
 				"error", err)
 		}
 	}
 
-	// Todos los intentos fallaron
-	logger.Errorw("Operación falló después de todos los reintentos",
+	// All attempts failed
+	logger.Errorw("Operation failed after all retries",
 		"attempts", config.MaxRetries+1,
 		"error", lastErr)
-	return fmt.Errorf("operación falló después de %d intentos: %w", config.MaxRetries+1, lastErr)
+	return fmt.Errorf("operation failed after %d attempts: %w", config.MaxRetries+1, lastErr)
 }
 
-// RateLimiter controla la velocidad de ejecución de operaciones
+// RateLimiter controls the execution rate of operations
 type RateLimiter struct {
-	// delay es el tiempo de espera entre operaciones
+	// delay is the wait time between operations
 	delay time.Duration
-	// lastExecution guarda cuándo se ejecutó la última operación
+	// lastExecution stores when the last operation was executed
 	lastExecution time.Time
-	// mutex protege el acceso concurrente a lastExecution
+	// mutex protects concurrent access to lastExecution
 	mutex sync.Mutex
 }
 
@@ -188,44 +188,44 @@ func NewRateLimiter(delay time.Duration) *RateLimiter {
 	}
 }
 
-// Wait espera el tiempo necesario para respetar el rate limit
-// Esta función asegura que no ejecutemos operaciones demasiado rápido
+// Wait waits the necessary time to respect the rate limit
+// This function ensures we don't execute operations too quickly
 func (rl *RateLimiter) Wait(ctx context.Context) error {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 
-	// Calculamos cuánto tiempo necesitamos esperar
+	// Calculate how long we need to wait
 	now := time.Now()
 	timeSinceLastExecution := now.Sub(rl.lastExecution)
 
 	if timeSinceLastExecution < rl.delay {
-		// Necesitamos esperar más tiempo
+		// We need to wait longer
 		waitTime := rl.delay - timeSinceLastExecution
 
-		// Liberamos el mutex durante la espera para no bloquear otros workers
+		// Release the mutex during the wait to not block other workers
 		rl.mutex.Unlock()
 
 		select {
 		case <-time.After(waitTime):
-			// Tiempo de espera completado
+			// Wait time completed
 		case <-ctx.Done():
-			// El contexto fue cancelado
-			rl.mutex.Lock() // Re-adquirimos el mutex para el defer
+			// The context was cancelled
+			rl.mutex.Lock() // Re-acquire the mutex for the defer
 			return ctx.Err()
 		}
 
-		// Re-adquirimos el mutex
+		// Re-acquire the mutex
 		rl.mutex.Lock()
 	}
 
-	// Actualizamos el tiempo de última ejecución
+	// Update the last execution time
 	rl.lastExecution = time.Now()
 	return nil
 }
 
-// ProcessAccountsInParallel procesa múltiples cuentas AWS en paralelo
-// Esta función es genérica y puede usarse para cualquier operación que necesite
-// ejecutarse en paralelo para múltiples cuentas
+// ProcessAccountsInParallel processes multiple AWS accounts in parallel
+// This function is generic and can be used for any operation that needs
+// to execute in parallel for multiple accounts
 func ProcessAccountsInParallel[T any](
 	ctx context.Context,
 	accounts []string,
@@ -233,137 +233,137 @@ func ProcessAccountsInParallel[T any](
 	processor func(ctx context.Context, accountID string) (T, error),
 ) (map[string]T, []error) {
 
-	// Creamos un contexto con timeout para toda la operación
-	// Si la operación tarda más del timeout configurado, se cancelará automáticamente
+	// Create a context with timeout for the entire operation
+	// If the operation takes longer than the configured timeout, it will be cancelled automatically
 	timeoutCtx, cancel := context.WithTimeout(ctx, config.Timeout)
-	defer cancel() // Importante: siempre cancelar el contexto al finalizar
+	defer cancel() // Important: always cancel the context when finishing
 
-	// WaitGroup nos permite esperar a que todas las goroutines terminen
+	// WaitGroup allows us to wait for all goroutines to finish
 	var wg sync.WaitGroup
 
-	// Channel para recibir los resultados de cada goroutine
-	// Tiene capacidad igual al número de cuentas para evitar bloqueos
+	// Channel to receive results from each goroutine
+	// Has capacity equal to the number of accounts to prevent blocking
 	resultChan := make(chan AccountResult, len(accounts))
 
-	// Creamos el pool de workers para controlar la concurrencia
+	// Create the worker pool to control concurrency
 	workerPool := NewWorkerPool(config.MaxWorkers)
 
-	// Creamos un rate limiter para controlar la velocidad de las requests
+	// Create a rate limiter to control the request rate
 	rateLimiter := NewRateLimiter(config.RateLimitDelay)
 
 	logger := logs.GetLogger()
-	logger.Infow("Iniciando procesamiento paralelo",
+	logger.Infow("Starting parallel processing",
 		"total_accounts", len(accounts),
 		"max_workers", config.MaxWorkers,
 		"rate_limit", config.RateLimitDelay,
 		"timeout", config.Timeout)
 
-	// Lanzamos una goroutine para cada cuenta
+	// Launch a goroutine for each account
 	for _, accountID := range accounts {
-		// Incrementamos el contador del WaitGroup antes de lanzar la goroutine
+		// Increment the WaitGroup counter before launching the goroutine
 		wg.Add(1)
 
-		// Capturamos el valor de accountID en una variable local
-		// Esto es importante en Go para evitar problemas con closures
+		// Capture the accountID value in a local variable
+		// This is important in Go to avoid problems with closures
 		currentAccountID := accountID
 
-		// Lanzamos la goroutine
+		// Launch the goroutine
 		go func() {
-			// Decrementamos el contador del WaitGroup cuando terminemos
+			// Decrement the WaitGroup counter when we finish
 			defer wg.Done()
 
-			logger.Debugf("Procesando cuenta: %s", currentAccountID)
+			logger.Debugf("Processing account: %s", currentAccountID)
 
-			// Ejecutamos el procesamiento en el worker pool
-			// Esto controlará la concurrencia automáticamente
+			// Execute the processing in the worker pool
+			// This will control concurrency automatically
 			err := workerPool.Execute(timeoutCtx, func() error {
-				// Primero esperamos para respetar el rate limit
-				// Esto previene sobrecargar las APIs de AWS
+				// First wait to respect the rate limit
+				// This prevents overloading AWS APIs
 				if err := rateLimiter.Wait(timeoutCtx); err != nil {
-					return fmt.Errorf("rate limit cancelado: %w", err)
+					return fmt.Errorf("rate limit cancelled: %w", err)
 				}
 
-				// Ahora ejecutamos la operación con reintentos automáticos
+				// Now execute the operation with automatic retries
 				var result T
 				var processingErr error
 
 				retryErr := ExecuteWithRetry(timeoutCtx, config, func() error {
-					// Aquí ejecutamos la función de procesamiento específica
+					// Here we execute the specific processing function
 					var err error
 					result, err = processor(timeoutCtx, currentAccountID)
 					processingErr = err
 					return err
 				})
 
-				// Si los reintentos fallaron, usamos el último error
+				// If retries failed, use the last error
 				if retryErr != nil {
 					processingErr = retryErr
 				}
 
-				// Enviamos el resultado al channel
-				// Usamos select para manejar el caso donde el contexto se cancela
+				// Send the result to the channel
+				// Use select to handle the case where the context is cancelled
 				select {
 				case resultChan <- AccountResult{
 					AccountID: currentAccountID,
 					Data:      result,
 					Error:     processingErr,
 				}:
-					// Resultado enviado exitosamente
+					// Result sent successfully
 					if processingErr != nil {
-						logger.Errorw("Error procesando cuenta",
+						logger.Errorw("Error processing account",
 							"account_id", currentAccountID,
 							"error", processingErr)
 					} else {
-						logger.Infow("Cuenta procesada exitosamente",
+						logger.Infow("Account processed successfully",
 							"account_id", currentAccountID)
 					}
 				case <-timeoutCtx.Done():
-					// El contexto fue cancelado, no podemos enviar el resultado
+					// The context was cancelled, we cannot send the result
 					return timeoutCtx.Err()
 				}
 				return nil
 			})
 
-			// Si hubo error en el worker pool (por timeout), enviamos el error
+			// If there was an error in the worker pool (due to timeout), send the error
 			if err != nil {
 				select {
 				case resultChan <- AccountResult{
 					AccountID: currentAccountID,
-					Data:      *new(T), // valor cero del tipo T
+					Data:      *new(T), // zero value of type T
 					Error:     err,
 				}:
 				case <-timeoutCtx.Done():
-					// No podemos enviar, pero no importa porque ya estamos cancelando
+					// Cannot send, but it doesn't matter because we're already cancelling
 				}
 			}
 		}()
 	}
 
-	// Lanzamos una goroutine para cerrar el channel cuando todas las tareas terminen
+	// Launch a goroutine to close the channel when all tasks finish
 	go func() {
-		// Esperamos a que todas las goroutines terminen
+		// Wait for all goroutines to finish
 		wg.Wait()
-		// Cerramos el channel para indicar que no habrá más resultados
+		// Close the channel to indicate there will be no more results
 		close(resultChan)
-		logger.Debug("Todas las cuentas han sido procesadas")
+		logger.Debug("All accounts have been processed")
 	}()
 
-	// Recolectamos todos los resultados del channel
+	// Collect all results from the channel
 	results := make(map[string]T)
 	var errors []error
 
-	// Leemos del channel hasta que se cierre
+	// Read from the channel until it closes
 	for result := range resultChan {
 		if result.Error != nil {
-			// Si hubo error, lo agregamos a la lista de errores
-			errors = append(errors, fmt.Errorf("cuenta %s: %w", result.AccountID, result.Error))
+			// If there was an error, add it to the error list
+			errors = append(errors, fmt.Errorf("account %s: %w", result.AccountID, result.Error))
 		} else {
-			// Si fue exitoso, agregamos el resultado al mapa
+			// If successful, add the result to the map
 			results[result.AccountID] = result.Data.(T)
 		}
 	}
 
-	logger.Infow("Procesamiento paralelo completado",
+	logger.Infow("Parallel processing completed",
 		"successful", len(results),
 		"errors", len(errors))
 
