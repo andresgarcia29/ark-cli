@@ -45,6 +45,7 @@ runs:
       with:
         go-version-file: 'go.mod'
         cache: true
+        cache-dependency-path: go.sum
 
     - name: Install GoReleaser
       uses: goreleaser/goreleaser-action@v6

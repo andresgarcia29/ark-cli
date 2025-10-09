@@ -21,6 +21,7 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         cache: true
+        cache-dependency-path: ${{ inputs.working-directory }}/go.sum
 
     - name: Get dependencies
       shell: bash

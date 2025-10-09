@@ -21,6 +21,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Clear Go cache
+        run: go clean -cache -modcache -testcache || true
+
       - name: Run tests
         uses: ./.github/actions/go-test
         with:
@@ -38,6 +41,7 @@ jobs:
         with:
           go-version: '1.21'
           cache: true
+          cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
