@@ -1,0 +1,54 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+
+	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
+	"github.com/spf13/cobra"
+)
+
+var (
+	awsLoginnCmd = &cobra.Command{
+		Use:   "login",
+		Short: "Start a new AWS Login session",
+		Long:  "Configure and start a new AWS Login session with the provided profile, fetching the credentials from the AWS Login cache",
+		Run:   awsLoginCommand,
+	}
+)
+
+var (
+	LoginProfile string
+	SetAsDefault bool
+)
+
+func init() {
+	awsCmd.AddCommand(awsLoginnCmd)
+	awsLoginnCmd.Flags().StringVar(&LoginProfile, "profile", "", "AWS profile name to login with")
+	awsLoginnCmd.Flags().BoolVar(&SetAsDefault, "set-default", false, "Set this profile as default")
+	awsLoginnCmd.MarkFlagRequired("profile")
+}
+
+func awsLoginCommand(cmd *cobra.Command, args []string) {
+	profileName := cmd.Flag("profile").Value.String()
+	setAsDefault, _ := cmd.Flags().GetBool("set-default")
+
+	if profileName == "" {
+		fmt.Println("Error: --profile flag is required")
+		return
+	}
+
+	fmt.Printf("Logging in with profile: %s\n", profileName)
+
+	ctx := context.Background()
+	if err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	if setAsDefault {
+		fmt.Printf("✓ Successfully logged in with profile '%s' and set as default\n", profileName)
+	} else {
+		fmt.Printf("✓ Successfully logged in with profile '%s'\n", profileName)
+	}
+}

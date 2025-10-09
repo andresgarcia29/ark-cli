@@ -1,0 +1,50 @@
+name: 'Go Test and Lint'
+description: 'Sets up Go environment, runs tests, and performs linting'
+inputs:
+  go-version:
+    description: 'Go version to use'
+    required: false
+    default: '1.21'
+  working-directory:
+    description: 'Working directory for the action'
+    required: false
+    default: '.'
+outputs:
+  test-result:
+    description: 'Test result (success or failure)'
+    value: ${{ steps.test.outputs.result }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+
+    - name: Get dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go mod download
+        go mod tidy
+
+    - name: Run go vet
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go vet ./...
+
+    - name: Run tests
+      id: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        echo "result=success" >> $GITHUB_OUTPUT
+
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/coverage.out
+        retention-days: 5

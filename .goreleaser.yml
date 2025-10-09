@@ -1,0 +1,149 @@
+# GoReleaser configuration for ark-cli
+# This file configures the build, archive, and release process
+
+# Project metadata
+project_name: ark-cli
+before:
+  hooks:
+    # Run tests before building
+    - go mod tidy
+    - go test ./...
+    # Run go vet for static analysis
+    - go vet ./...
+
+# Build configuration
+builds:
+  - id: ark-cli
+    binary: ark
+    main: ./main.go
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - "6"
+      - "7"
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+
+# Archive configuration
+archives:
+  - id: ark-cli
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG*
+    format: tar.gz
+
+# Checksums
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# Snapshots (for development releases)
+snapshot:
+  name_template: "{{ .Tag }}-next"
+  prerelease: auto
+
+# Changelog generation
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^build:'
+      - '^chore:'
+
+# GitHub release configuration
+release:
+  github:
+    owner: andresgarcia29
+    name: ark-cli
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## ark-cli {{ .Tag }}
+    
+    A powerful CLI tool for AWS and Kubernetes operations.
+    
+    ### Installation
+    
+    #### Using Go
+    ```bash
+    go install github.com/andresgarcia29/ark-cli@latest
+    ```
+    
+    #### Using Homebrew (macOS)
+    ```bash
+    brew install andresgarcia29/ark-cli/ark-cli
+    ```
+    
+    #### Download Binary
+    Download the appropriate binary for your platform from the assets below.
+    
+    ### What's Changed
+  footer: |
+    **Full Changelog**: https://github.com/andresgarcia29/ark-cli/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Homebrew formula (for macOS users)
+brews:
+  - name: ark-cli
+    tap:
+      owner: andresgarcia29
+      name: homebrew-ark-cli
+    folder: Formula
+    description: "A powerful CLI tool for AWS and Kubernetes operations"
+    homepage: "https://github.com/andresgarcia29/ark-cli"
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/ark --version"
+    install: |
+      bin.install "ark"
+
+# Scoop manifest (for Windows users)
+scoops:
+  - name: ark-cli
+    bucket:
+      owner: andresgarcia29
+      name: ark-cli-bucket
+    description: "A powerful CLI tool for AWS and Kubernetes operations"
+    homepage: "https://github.com/andresgarcia29/ark-cli"
+    license: "MIT"
+    skip_upload: auto
+
+# Notifications
+announce:
+  skip: "{{gt .Patch 0}}"
+  twitter:
+    enabled: false
+  mastodon:
+    enabled: false
+  reddit:
+    enabled: false
+  discord:
+    enabled: false
+  slack:
+    enabled: false
+
+# Metadata
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+  version: "{{ .Version }}"

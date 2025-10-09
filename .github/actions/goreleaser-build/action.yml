@@ -1,0 +1,103 @@
+name: 'GoReleaser Build and Release'
+description: 'Builds and releases the project using GoReleaser'
+inputs:
+  github-token:
+    description: 'GitHub token for creating releases'
+    required: true
+  goreleaser-version:
+    description: 'GoReleaser version to use'
+    required: false
+    default: 'latest'
+  release-notes:
+    description: 'Custom release notes'
+    required: false
+    default: ''
+  snapshot:
+    description: 'Build snapshot (without publishing)'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory for the action'
+    required: false
+    default: '.'
+outputs:
+  artifacts:
+    description: 'Paths to built artifacts'
+    value: ${{ steps.release.outputs.artifacts }}
+  version:
+    description: 'Version that was released'
+    value: ${{ steps.release.outputs.version }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ inputs.github-token }}
+
+    - name: Fetch all tags
+      shell: bash
+      run: git fetch --force --tags
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Install GoReleaser
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        install-only: true
+        version: ${{ inputs.goreleaser-version }}
+
+    - name: Run GoReleaser (Release)
+      id: release
+      if: inputs.snapshot == 'false'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        goreleaser release --clean
+
+        # Get version from tag
+        VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+        # Get artifacts
+        if [ -d "dist" ]; then
+          ARTIFACTS=$(find dist -type f -name "*.tar.gz" -o -name "*.zip" | tr '\n' ',' | sed 's/,$//')
+          echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run GoReleaser (Snapshot)
+      id: snapshot
+      if: inputs.snapshot == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        goreleaser release --snapshot --clean
+
+        # Get version
+        VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "snapshot")
+        echo "version=$VERSION-snapshot" >> $GITHUB_OUTPUT
+
+        # Get artifacts
+        if [ -d "dist" ]; then
+          ARTIFACTS=$(find dist -type f -name "*.tar.gz" -o -name "*.zip" | tr '\n' ',' | sed 's/,$//')
+          echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: |
+          ${{ inputs.working-directory }}/dist/*.tar.gz
+          ${{ inputs.working-directory }}/dist/*.zip
+          ${{ inputs.working-directory }}/dist/checksums.txt
+        retention-days: 5
