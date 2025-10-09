@@ -3,6 +3,11 @@ package services_aws
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/andresgarcia29/ark-cli/lib"
 	"github.com/andresgarcia29/ark-cli/logs"
@@ -105,34 +110,114 @@ func (s *SSOClient) GetAllProfiles(ctx context.Context, accessToken string) ([]A
 
 // LoginWithProfile performs complete login with a specific profile
 func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool) error {
+	logger := logs.GetLogger()
+
 	// Step 1: Read profile configuration
 	profileConfig, err := ReadProfileFromConfig(profileName)
 	if err != nil {
 		return fmt.Errorf("failed to read profile config: %w", err)
 	}
 
-	// Step 2: Read token from cache
-	cachedToken, err := ReadTokenFromCache(profileConfig.StartURL)
-	if err != nil {
-		return fmt.Errorf("failed to read token from cache (you may need to run login first): %w", err)
+	logger.Infow("Profile configuration loaded",
+		"profile_name", profileName,
+		"profile_type", profileConfig.ProfileType)
+
+	var creds *Credentials
+
+	// Step 2: Handle different profile types
+	switch profileConfig.ProfileType {
+	case ProfileTypeSSO:
+		logger.Info("Processing SSO profile")
+
+		// Read token from cache
+		cachedToken, err := ReadTokenFromCache(profileConfig.StartURL)
+		if err != nil {
+			return fmt.Errorf("failed to read token from cache (you may need to run login first): %w", err)
+		}
+
+		// Create SSO client
+		client, err := NewSSOClient(ctx, profileConfig.SSORegion, profileConfig.StartURL)
+		if err != nil {
+			return fmt.Errorf("failed to create SSO client: %w", err)
+		}
+
+		// Get temporary credentials
+		creds, err = client.GetRoleCredentials(ctx, cachedToken.AccessToken, profileConfig.AccountID, profileConfig.RoleName)
+		if err != nil {
+			return fmt.Errorf("failed to get role credentials: %w", err)
+		}
+
+	case ProfileTypeAssumeRole:
+		logger.Info("Processing assume role profile")
+
+		// Validate required fields for assume role
+		if profileConfig.RoleARN == "" {
+			return fmt.Errorf("role_arn is required for assume role profile")
+		}
+		if profileConfig.SourceProfile == "" {
+			return fmt.Errorf("source_profile is required for assume role profile")
+		}
+
+		// Assume the role
+		creds, err = AssumeRoleWithProfile(ctx, profileConfig)
+		if err != nil {
+			return fmt.Errorf("failed to assume role: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported profile type: %s", profileConfig.ProfileType)
 	}
 
-	// Step 3: Create SSO client
-	client, err := NewSSOClient(ctx, profileConfig.SSORegion, profileConfig.StartURL)
-	if err != nil {
-		return fmt.Errorf("failed to create SSO client: %w", err)
-	}
-
-	// Step 4: Get temporary credentials
-	creds, err := client.GetRoleCredentials(ctx, cachedToken.AccessToken, profileConfig.AccountID, profileConfig.RoleName)
-	if err != nil {
-		return fmt.Errorf("failed to get role credentials: %w", err)
-	}
-
-	// Step 5: Write credentials to file
+	// Step 3: Write credentials to file
 	if err := WriteCredentialsFile(profileName, creds, setAsDefault); err != nil {
 		return fmt.Errorf("failed to write credentials: %w", err)
 	}
 
+	logger.Infow("Login successful",
+		"profile_name", profileName,
+		"profile_type", profileConfig.ProfileType)
+
 	return nil
+}
+
+// AssumeRoleWithProfile asume un rol usando las credenciales del perfil fuente
+func AssumeRoleWithProfile(ctx context.Context, profileConfig *ProfileConfig) (*Credentials, error) {
+	// Crear configuración para el perfil fuente
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithSharedConfigProfile(profileConfig.SourceProfile),
+		config.WithRegion(profileConfig.Region),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load source profile config: %w", err)
+	}
+
+	// Crear cliente STS
+	stsClient := sts.NewFromConfig(cfg)
+
+	// Preparar input para assume role
+	input := &sts.AssumeRoleInput{
+		RoleArn:         aws.String(profileConfig.RoleARN),
+		RoleSessionName: aws.String(fmt.Sprintf("ark-cli-%d", time.Now().Unix())),
+	}
+
+	// Agregar ExternalID si está presente
+	if profileConfig.ExternalID != "" {
+		input.ExternalId = aws.String(profileConfig.ExternalID)
+	}
+
+	// Asumir el rol
+	result, err := stsClient.AssumeRole(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to assume role: %w", err)
+	}
+
+	// Convertir a nuestro formato de credenciales
+	creds := &Credentials{
+		AccessKeyID:     aws.ToString(result.Credentials.AccessKeyId),
+		SecretAccessKey: aws.ToString(result.Credentials.SecretAccessKey),
+		SessionToken:    aws.ToString(result.Credentials.SessionToken),
+		Expiration:      result.Credentials.Expiration.UnixMilli(),
+	}
+
+	return creds, nil
 }

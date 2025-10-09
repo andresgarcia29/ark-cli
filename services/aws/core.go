@@ -104,14 +104,27 @@ type AWSProfile struct {
 	EmailAddress string
 }
 
-// ProfileConfig representa la configuración de un perfil de SSO
+// ProfileType representa el tipo de perfil
+type ProfileType string
+
+const (
+	ProfileTypeSSO        ProfileType = "sso"
+	ProfileTypeAssumeRole ProfileType = "assume_role"
+)
+
+// ProfileConfig representa la configuración de un perfil de AWS
 type ProfileConfig struct {
 	ProfileName string
+	ProfileType ProfileType
 	StartURL    string
 	Region      string
 	AccountID   string
 	RoleName    string
 	SSORegion   string
+	// Campos para assume role
+	RoleARN       string
+	SourceProfile string
+	ExternalID    string
 }
 
 // Credentials representa las credenciales temporales de AWS

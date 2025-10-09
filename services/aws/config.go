@@ -80,7 +80,9 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	// Parsear el archivo INI manualmente
 	lines := strings.Split(string(data), "\n")
 	var currentProfile string
-	profileConfig := &ProfileConfig{}
+	profileConfig := &ProfileConfig{
+		ProfileName: profileName,
+	}
 	found := false
 
 	targetProfile := fmt.Sprintf("[profile %s]", profileName)
@@ -93,7 +95,6 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 			currentProfile = line
 			if currentProfile == targetProfile {
 				found = true
-				profileConfig.ProfileName = profileName
 			}
 		}
 
@@ -115,6 +116,12 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 					profileConfig.RoleName = value
 				case "region":
 					profileConfig.Region = value
+				case "role_arn":
+					profileConfig.RoleARN = value
+				case "source_profile":
+					profileConfig.SourceProfile = value
+				case "external_id":
+					profileConfig.ExternalID = value
 				}
 			}
 		}
@@ -127,6 +134,15 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 
 	if !found {
 		return nil, fmt.Errorf("profile %s not found in config", profileName)
+	}
+
+	// Determinar el tipo de perfil basado en las propiedades encontradas
+	if profileConfig.RoleARN != "" {
+		profileConfig.ProfileType = ProfileTypeAssumeRole
+	} else if profileConfig.StartURL != "" {
+		profileConfig.ProfileType = ProfileTypeSSO
+	} else {
+		return nil, fmt.Errorf("profile %s is neither SSO nor assume role profile", profileName)
 	}
 
 	return profileConfig, nil
