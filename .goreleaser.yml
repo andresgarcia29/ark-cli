@@ -94,14 +94,16 @@ release:
 # Homebrew tap configuration
 brews:
   - name: ark-cli
+    ids:
+      - ark
     repository:
       owner: andresgarcia29
       name: homebrew-agm
+      branch: main
       token: "{{ .Env.GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    folder: Formula
     homepage: https://github.com/andresgarcia29/ark-cli
     description: A powerful CLI tool for AWS and Kubernetes operations
     license: MIT
