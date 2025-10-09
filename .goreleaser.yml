@@ -92,7 +92,7 @@ release:
     **Full Changelog**: https://github.com/andresgarcia29/ark-cli/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 # Homebrew tap configuration
-brews:
+homebrew_casks:
   - name: ark-cli
     ids:
       - ark
@@ -104,14 +104,10 @@ brews:
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    directory: Formula
     homepage: https://github.com/andresgarcia29/ark-cli
     description: A powerful CLI tool for AWS and Kubernetes operations
     license: MIT
-    test: |
-      system "#{bin}/ark", "--version"
-    install: |
-      bin.install "ark"
+    binary: ark
 
 # Metadata
 metadata:
