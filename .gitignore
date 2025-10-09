@@ -31,3 +31,7 @@ go.work.sum
 # .idea/
 .vscode/
 .cloude
+
+# Dist
+dist/
+.DS_Store

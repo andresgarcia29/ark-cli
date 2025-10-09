@@ -1,8 +1,11 @@
 # GoReleaser configuration for ark-cli
 # This file configures the build, archive, and release process
 
+version: 2
+
 # Project metadata
 project_name: ark-cli
+
 before:
   hooks:
     # Run tests before building
@@ -40,24 +43,15 @@ builds:
 archives:
   - id: ark-cli
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - README.md
       - LICENSE*
       - CHANGELOG*
-    format: tar.gz
 
 # Checksums
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
-
-# Snapshots (for development releases)
-snapshot:
-  name_template: "{{ .Tag }}-next"
-  prerelease: auto
 
 # Changelog generation
 changelog:
@@ -90,11 +84,6 @@ release:
     go install github.com/andresgarcia29/ark-cli@latest
     ```
     
-    #### Using Homebrew (macOS)
-    ```bash
-    brew install andresgarcia29/ark-cli/ark-cli
-    ```
-    
     #### Download Binary
     Download the appropriate binary for your platform from the assets below.
     
@@ -102,48 +91,6 @@ release:
   footer: |
     **Full Changelog**: https://github.com/andresgarcia29/ark-cli/compare/{{ .PreviousTag }}...{{ .Tag }}
 
-# Homebrew formula (for macOS users)
-brews:
-  - name: ark-cli
-    tap:
-      owner: andresgarcia29
-      name: homebrew-ark-cli
-    folder: Formula
-    description: "A powerful CLI tool for AWS and Kubernetes operations"
-    homepage: "https://github.com/andresgarcia29/ark-cli"
-    license: "MIT"
-    skip_upload: auto
-    test: |
-      system "#{bin}/ark --version"
-    install: |
-      bin.install "ark"
-
-# Scoop manifest (for Windows users)
-scoops:
-  - name: ark-cli
-    bucket:
-      owner: andresgarcia29
-      name: ark-cli-bucket
-    description: "A powerful CLI tool for AWS and Kubernetes operations"
-    homepage: "https://github.com/andresgarcia29/ark-cli"
-    license: "MIT"
-    skip_upload: auto
-
-# Notifications
-announce:
-  skip: "{{gt .Patch 0}}"
-  twitter:
-    enabled: false
-  mastodon:
-    enabled: false
-  reddit:
-    enabled: false
-  discord:
-    enabled: false
-  slack:
-    enabled: false
-
 # Metadata
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
-  version: "{{ .Version }}"
