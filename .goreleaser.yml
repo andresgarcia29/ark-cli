@@ -72,7 +72,6 @@ release:
   draft: false
   prerelease: auto
   mode: replace
-  replace_existing: true
   header: |
     ## ark-cli {{ .Tag }}
     
