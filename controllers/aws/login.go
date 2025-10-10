@@ -1,0 +1,31 @@
+package controllers
+
+import (
+	"context"
+	"fmt"
+
+	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
+)
+
+// AttemptLoginWithRetry maneja el login con retry automático
+func AttemptLoginWithRetry(ctx context.Context, profileName string, setAsDefault bool, ssoRegion string, ssoStartURL string) error {
+	// Primer intento de login
+	if err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); err != nil {
+		fmt.Printf("❌ Login failed: %v\n", err)
+		fmt.Println("🔄 Attempting SSO login...")
+
+		// Realizar SSO login
+		if ssoErr := AWSSSOLogin(ctx, ssoRegion, ssoStartURL, false); ssoErr != nil {
+			return fmt.Errorf("SSO login failed: %v", ssoErr)
+		}
+
+		fmt.Println("🔄 Retrying login with updated credentials...")
+
+		// Segundo intento de login después del SSO
+		if retryErr := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); retryErr != nil {
+			return fmt.Errorf("login failed after SSO: %v", retryErr)
+		}
+	}
+
+	return nil
+}

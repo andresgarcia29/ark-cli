@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
 	animation "github.com/andresgarcia29/ark-cli/lib/animation"
-	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +37,9 @@ func aws(cmd *cobra.Command, args []string) {
 	fmt.Printf("\n✅ Selected profile: %s (%s)\n", selectedProfile.ProfileName, selectedProfile.ProfileType)
 	fmt.Println("🔐 Logging in...")
 
-	// Realizar login con el perfil seleccionado
-	if err := services_aws.LoginWithProfile(ctx, selectedProfile.ProfileName, true); err != nil {
-		fmt.Printf("❌ Login failed: %v\n", err)
+	// Realizar login con el perfil seleccionado usando retry
+	if err := controllers.AttemptLoginWithRetry(ctx, selectedProfile.ProfileName, true, selectedProfile.SSORegion, selectedProfile.StartURL); err != nil {
+		fmt.Printf("❌ Login failed after retry: %v\n", err)
 		return
 	}
 

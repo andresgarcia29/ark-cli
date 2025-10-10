@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 	"github.com/spf13/cobra"
 )
@@ -43,8 +44,17 @@ func awsLoginCommand(cmd *cobra.Command, args []string) {
 	fmt.Printf("Logging in with profile: %s\n", profileName)
 
 	ctx := context.Background()
-	if err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); err != nil {
-		fmt.Println("Error:", err)
+
+	// Obtener información del perfil para SSO
+	profileConfig, err := services_aws.ReadProfileFromConfig(profileName)
+	if err != nil {
+		fmt.Printf("Error reading profile config: %v\n", err)
+		return
+	}
+
+	// Usar función de retry para el login
+	if err := controllers.AttemptLoginWithRetry(ctx, profileName, setAsDefault, profileConfig.SSORegion, profileConfig.StartURL); err != nil {
+		fmt.Printf("❌ Login failed after retry: %v\n", err)
 		return
 	}
 
