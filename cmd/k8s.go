@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	controllers_k8s "github.com/andresgarcia29/ark-cli/controllers/kubernetes"
+	"github.com/andresgarcia29/ark-cli/lib/animation"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 	services_kubernetes "github.com/andresgarcia29/ark-cli/services/kubernetes"
 	"github.com/spf13/cobra"
@@ -32,16 +34,21 @@ func init() {
 func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, replaceProfile string) error {
 	// Paso 1: Limpiar kubeconfig si se requiere
 	if cleanKubeconfig {
-		fmt.Println("Cleaning kubeconfig...")
+		fmt.Println("🧹 Cleaning kubeconfig...")
 		if err := services_kubernetes.CleanKubeconfig(kubeconfigPath); err != nil {
 			return fmt.Errorf("failed to clean kubeconfig: %w", err)
 		}
 		fmt.Println()
 	}
 
-	// Paso 2: Obtener todos los clusters de todas las cuentas
-	fmt.Println("Fetching EKS clusters from all accounts...")
-	clusters, err := services_aws.GetClustersFromAllAccounts(ctx, regions)
+	// Paso 2: Obtener todos los clusters de todas las cuentas con spinner
+	var clusters []services_aws.EKSCluster
+	err := animation.ShowSpinner("Fetching EKS clusters from all accounts", func() error {
+		var err error
+		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions)
+		return err
+	})
+
 	if err != nil {
 		return fmt.Errorf("failed to get clusters: %w", err)
 	}
@@ -63,13 +70,13 @@ func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubecon
 		fmt.Printf("  - Account %s: %d cluster(s)\n", accountID, count)
 	}
 
-	fmt.Println("\nUpdating kubeconfig for all clusters...")
-	// Paso 3: Configurar kubeconfig para todos los clusters
-	if err := services_kubernetes.UpdateKubeconfigForAllClusters(clusters, replaceProfile); err != nil {
+	fmt.Println()
+
+	// Paso 3: Configurar kubeconfig para todos los clusters con progress bar
+	if err := controllers_k8s.UpdateKubeconfigWithProgress(clusters, replaceProfile); err != nil {
 		return fmt.Errorf("failed to update kubeconfig: %w", err)
 	}
 
-	fmt.Println("\n🎉 All EKS clusters configured successfully!")
 	return nil
 }
 
