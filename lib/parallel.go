@@ -86,6 +86,13 @@ func NewWorkerPool(maxWorkers int) *WorkerPool {
 // Execute executes a function in the worker pool
 // This function blocks until a worker is available
 func (wp *WorkerPool) Execute(ctx context.Context, fn func() error) error {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	select {
 	// Attempt to acquire a slot in the semaphore
 	case wp.semaphore <- struct{}{}:
@@ -122,6 +129,13 @@ func GetWorkerPool(maxWorkers int) *WorkerPool {
 func ExecuteWithRetry(ctx context.Context, config ParallelConfig, operation func() error) error {
 	logger := logs.GetLogger()
 	var lastErr error
+
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	// Attempt the operation up to MaxRetries + 1 times (initial attempt + retries)
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
@@ -191,6 +205,13 @@ func NewRateLimiter(delay time.Duration) *RateLimiter {
 // Wait waits the necessary time to respect the rate limit
 // This function ensures we don't execute operations too quickly
 func (rl *RateLimiter) Wait(ctx context.Context) error {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 

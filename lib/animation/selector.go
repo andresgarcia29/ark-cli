@@ -165,7 +165,7 @@ func (m *profileSelectorModel) filterProfiles() {
 		return
 	}
 
-	var filtered []services_aws.ProfileConfig
+	filtered := make([]services_aws.ProfileConfig, 0)
 	query := strings.ToLower(m.searchQuery)
 
 	for _, profile := range m.profiles {

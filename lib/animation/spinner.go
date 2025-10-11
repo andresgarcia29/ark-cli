@@ -53,6 +53,10 @@ func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 
+	case tea.QuitMsg:
+		m.quitting = true
+		return m, nil
+
 	default:
 		return m, nil
 	}
