@@ -148,6 +148,48 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	return profileConfig, nil
 }
 
+// ResolveSSOConfiguration resuelve la configuración SSO para un perfil
+// Si es un perfil assume role, obtiene la configuración del source profile
+func ResolveSSOConfiguration(profileName string) (ssoRegion, ssoStartURL string, err error) {
+	profileConfig, err := ReadProfileFromConfig(profileName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read profile config: %w", err)
+	}
+
+	// Si es un perfil SSO directo, devolver su configuración
+	if profileConfig.ProfileType == ProfileTypeSSO {
+		if profileConfig.SSORegion == "" || profileConfig.StartURL == "" {
+			return "", "", fmt.Errorf("profile %s has incomplete SSO configuration (region: %s, start_url: %s)",
+				profileName, profileConfig.SSORegion, profileConfig.StartURL)
+		}
+		return profileConfig.SSORegion, profileConfig.StartURL, nil
+	}
+
+	// Si es un perfil assume role, obtener la configuración del source profile
+	if profileConfig.ProfileType == ProfileTypeAssumeRole {
+		if profileConfig.SourceProfile == "" {
+			return "", "", fmt.Errorf("assume role profile %s is missing source_profile", profileName)
+		}
+
+		sourceProfileConfig, err := ReadProfileFromConfig(profileConfig.SourceProfile)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read source profile %s: %w", profileConfig.SourceProfile, err)
+		}
+
+		if sourceProfileConfig.ProfileType == ProfileTypeSSO {
+			if sourceProfileConfig.SSORegion == "" || sourceProfileConfig.StartURL == "" {
+				return "", "", fmt.Errorf("source profile %s has incomplete SSO configuration (region: %s, start_url: %s)",
+					profileConfig.SourceProfile, sourceProfileConfig.SSORegion, sourceProfileConfig.StartURL)
+			}
+			return sourceProfileConfig.SSORegion, sourceProfileConfig.StartURL, nil
+		}
+
+		return "", "", fmt.Errorf("source profile %s is not an SSO profile (type: %s)", profileConfig.SourceProfile, sourceProfileConfig.ProfileType)
+	}
+
+	return "", "", fmt.Errorf("profile %s does not have SSO configuration (type: %s)", profileName, profileConfig.ProfileType)
+}
+
 // ReadAllProfilesFromConfig lee todos los perfiles del archivo ~/.aws/config
 func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 	homeDir, err := os.UserHomeDir()
