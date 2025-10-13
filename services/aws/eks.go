@@ -109,7 +109,7 @@ func GetClustersForAccountMultiRegion(ctx context.Context, profile, accountID st
 
 // GetClustersFromAllAccounts gets clusters from all accounts in the specified regions
 // OPTIMIZED VERSION: Parallelizes the processing of multiple AWS accounts
-func GetClustersFromAllAccounts(ctx context.Context, regions []string) ([]EKSCluster, error) {
+func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefixs []string) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
 	// If no regions are specified, use default
@@ -125,7 +125,7 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string) ([]EKSClu
 	}
 
 	// Step 2: Select one profile per account (prioritizing ReadOnly)
-	selectedProfiles := SelectProfilesPerAccount(allProfiles)
+	selectedProfiles := SelectProfilesPerAccount(allProfiles, rolePrefixs)
 	logger.Infow("Accounts found to scan",
 		"total_accounts", len(selectedProfiles))
 

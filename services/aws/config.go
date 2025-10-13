@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -275,7 +276,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 }
 
 // SelectProfilesPerAccount selecciona un perfil por cuenta, priorizando ReadOnlyAccess
-func SelectProfilesPerAccount(profiles []ProfileConfig) map[string]ProfileConfig {
+func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[string]ProfileConfig {
 	accountProfiles := make(map[string][]ProfileConfig)
 
 	// Agrupar perfiles por cuenta
@@ -293,7 +294,7 @@ func SelectProfilesPerAccount(profiles []ProfileConfig) map[string]ProfileConfig
 		// Buscar ReadOnlyAccess primero
 		for _, profile := range accountProfileList {
 			roleName := strings.ToLower(profile.RoleName)
-			if strings.Contains(roleName, "readonly") || strings.Contains(roleName, "read-only") {
+			if slices.Contains(prefixs, roleName) {
 				selected = profile
 				foundReadOnly = true
 				break

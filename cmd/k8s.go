@@ -27,11 +27,12 @@ func init() {
 	kubernetesCmd.Flags().Bool("clean", true, "Clean kubeconfig before configuring")
 	kubernetesCmd.Flags().Bool("set-up", false, "Configure kubeconfig")
 	kubernetesCmd.Flags().String("kubeconfig-path", "~/.kube/config", "Path to kubeconfig")
+	kubernetesCmd.Flags().StringSlice("role-prefixs", []string{"readonly", "read-only"}, "Role prefixs to scan")
 	kubernetesCmd.Flags().String("replace-profile", "", "Replace profile in kubeconfig")
 }
 
 // ConfigureAllEKSClusters es el flujo completo para configurar todos los clusters EKS
-func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, replaceProfile string) error {
+func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, rolePrefixs []string, replaceProfile string) error {
 	// Paso 1: Limpiar kubeconfig si se requiere
 	if cleanKubeconfig {
 		fmt.Println("🧹 Cleaning kubeconfig...")
@@ -45,7 +46,7 @@ func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubecon
 	var clusters []services_aws.EKSCluster
 	err := animation.ShowSpinner("Fetching EKS clusters from all accounts", func() error {
 		var err error
-		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions)
+		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions, rolePrefixs)
 		return err
 	})
 
@@ -86,11 +87,17 @@ func kubernetes(cmd *cobra.Command, args []string) {
 	setUp, _ := cmd.Flags().GetBool("set-up")
 	kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path")
 	replaceProfile, _ := cmd.Flags().GetString("replace-profile")
+	rolePrefixs, _ := cmd.Flags().GetStringSlice("role-prefixs")
 
 	ctx := context.Background()
 
+	if rolePrefixs == nil {
+		fmt.Println("No role prefixs provided, using default prefixs: readonly, read-only")
+		rolePrefixs = []string{"readonly", "read-only"}
+	}
+
 	if setUp {
-		if err := ConfigureAllEKSClusters(ctx, regions, cleanConfig, kubeconfigPath, replaceProfile); err != nil {
+		if err := ConfigureAllEKSClusters(ctx, regions, cleanConfig, kubeconfigPath, rolePrefixs, replaceProfile); err != nil {
 			fmt.Println("Error:", err)
 			return
 		}
