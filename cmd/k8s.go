@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
 	"github.com/andresgarcia29/ark-cli/lib/animation"
@@ -28,10 +29,33 @@ func init() {
 func kubernetes(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 
-	// Mostrar selector interactivo de clusters
-	selectedCluster, err := animation.InteractiveClusterSelector()
+	// Add timeout to prevent hanging
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Test kubectl availability first
+	fmt.Println("🔍 Checking kubectl availability...")
+	if err := testKubectlAvailability(); err != nil {
+		fmt.Printf("❌ kubectl is not available or not working: %v\n", err)
+		fmt.Println("💡 Please ensure kubectl is installed and configured properly")
+		return
+	}
+	fmt.Println("✅ kubectl is available")
+
+	// Mostrar selector interactivo de clusters with timeout
+	fmt.Println("🔍 Loading cluster contexts...")
+	selectedCluster, err := interactiveClusterSelectorWithTimeout(timeoutCtx)
 	if err != nil {
-		fmt.Printf("❌ Error selecting cluster: %v\n", err)
+		if timeoutCtx.Err() == context.DeadlineExceeded {
+			fmt.Printf("❌ Timeout: Cluster selector took too long to respond\n")
+			fmt.Println("💡 This might be due to:")
+			fmt.Println("   - Network connectivity issues")
+			fmt.Println("   - kubectl configuration problems")
+			fmt.Println("   - AWS credentials issues")
+			fmt.Println("   - Try running with --debug flag for more details")
+		} else {
+			fmt.Printf("❌ Error selecting cluster: %v\n", err)
+		}
 		return
 	}
 
@@ -96,4 +120,44 @@ func assumeRoleForCluster(ctx context.Context, cluster *services_kubernetes.Clus
 
 	fmt.Printf("✅ Successfully assumed role for profile: %s\n", cluster.Profile)
 	return nil
+}
+
+// testKubectlAvailability tests if kubectl is available and working
+func testKubectlAvailability() error {
+	// Test basic kubectl command
+	clusters, err := services_kubernetes.GetClusterContexts()
+	if err != nil {
+		return fmt.Errorf("kubectl is not working properly: %w", err)
+	}
+
+	// If we get here, kubectl is working
+	_ = clusters // We don't need to use the clusters, just test if the call works
+	return nil
+}
+
+// interactiveClusterSelectorWithTimeout wraps the cluster selector with timeout handling
+func interactiveClusterSelectorWithTimeout(ctx context.Context) (*services_kubernetes.ClusterContext, error) {
+	// Create a channel to receive the result
+	resultChan := make(chan *services_kubernetes.ClusterContext, 1)
+	errorChan := make(chan error, 1)
+
+	// Run the selector in a goroutine
+	go func() {
+		cluster, err := animation.InteractiveClusterSelector()
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		resultChan <- cluster
+	}()
+
+	// Wait for either result or timeout
+	select {
+	case cluster := <-resultChan:
+		return cluster, nil
+	case err := <-errorChan:
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
