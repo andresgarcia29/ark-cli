@@ -11,9 +11,12 @@ import (
 
 // ClusterDisplayInfo contiene información para mostrar en la lista interactiva
 type ClusterDisplayInfo struct {
-	Name    string
-	Current bool
-	Status  string
+	Name        string
+	Current     bool
+	Status      string
+	Profile     string
+	Region      string
+	ClusterName string
 }
 
 // clusterSelectorModel representa el modelo para el selector de clusters con Bubble Tea
@@ -284,11 +287,33 @@ func (m clusterSelectorModel) View() string {
 			nameStyle = nameStyle.Bold(true)
 		}
 
+		// Build description with profile and region info
+		description := ""
+		if displayInfo.Profile != "" {
+			description = fmt.Sprintf("Profile: %s", displayInfo.Profile)
+		}
+		if displayInfo.Region != "" {
+			if description != "" {
+				description += ", "
+			}
+			description += fmt.Sprintf("Region: %s", displayInfo.Region)
+		}
+		if displayInfo.ClusterName != "" {
+			if description != "" {
+				description += ", "
+			}
+			description += fmt.Sprintf("Cluster: %s", displayInfo.ClusterName)
+		}
+
 		line := fmt.Sprintf("%s %s %s",
 			cursor,
 			nameStyle.Render(displayInfo.Name),
 			statusStyle.Render(displayInfo.Status),
 		)
+
+		if description != "" {
+			line += fmt.Sprintf(" - %s", lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(description))
+		}
 
 		s.WriteString(line)
 		s.WriteString("\n")
@@ -314,9 +339,12 @@ func formatClusterDisplay(cluster services_kubernetes.ClusterContext) ClusterDis
 	}
 
 	return ClusterDisplayInfo{
-		Name:    cluster.Name,
-		Current: cluster.Current,
-		Status:  status,
+		Name:        cluster.Name,
+		Current:     cluster.Current,
+		Status:      status,
+		Profile:     cluster.Profile,
+		Region:      cluster.Region,
+		ClusterName: cluster.ClusterName,
 	}
 }
 
