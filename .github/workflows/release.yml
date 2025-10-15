@@ -83,3 +83,15 @@ jobs:
           echo "- **Bump Type**: ${{ needs.create-tag.outputs.bump }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🎉 Release completed successfully!" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send iPhone notification
+        if: always()
+        run: |
+          curl -s \
+            -F "token=${{ secrets.PUSHOVER_TOKEN }}" \
+            -F "user=${{ secrets.PUSHOVER_USER }}" \
+            -F "title=GitHub Action Completed" \
+            -F "message=Workflow ${{ github.workflow }} (${{
+              github.run_number
+            }}) finished with status: ${{ job.status }}" \
+            https://api.pushover.net/1/messages.json
