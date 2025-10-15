@@ -35,7 +35,7 @@ func TestGetContextDetailsIntegration(t *testing.T) {
 
 	// Test context details extraction for the first context
 	firstContext := contexts[0].Name
-	profile, region, clusterName, err := getContextDetails(firstContext)
+	profile, region, clusterName, err := GetKubernetesContextDetails(firstContext)
 	if err != nil {
 		t.Errorf("Failed to get context details for %s: %v", firstContext, err)
 		return

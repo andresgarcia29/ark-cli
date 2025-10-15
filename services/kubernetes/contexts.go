@@ -107,7 +107,7 @@ func getCurrentContext() (string, error) {
 }
 
 // getContextDetails extracts profile, region, and cluster name from a specific context
-func getContextDetails(contextName string) (profile, region, clusterName string, err error) {
+func GetKubernetesContextDetails(contextName string) (profile, region, clusterName string, err error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Getting context details", "context", contextName)
 

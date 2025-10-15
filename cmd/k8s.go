@@ -57,6 +57,15 @@ func kubernetes(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println()
 
+	profile, region, clusterName, err := services_kubernetes.GetKubernetesContextDetails(selectedCluster.Name)
+	if err != nil {
+		fmt.Printf("❌ Failed to get context details: %v\n", err)
+		return
+	}
+	selectedCluster.Profile = profile
+	selectedCluster.Region = region
+	selectedCluster.ClusterName = clusterName
+
 	// Si el cluster ya está activo, verificar si necesitamos asumir el rol
 	if selectedCluster.Current {
 		fmt.Println("🎉 This cluster is already active!")
