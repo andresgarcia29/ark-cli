@@ -6,18 +6,24 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/andresgarcia29/ark-cli/logs"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
 	"github.com/aws/smithy-go"
 )
 
 func StartSSOSession(ctx context.Context, region, startURL string) error {
+	logger := logs.GetLogger()
+	logger.Infow("Starting AWS SSO session", "region", region, "start_url", startURL)
 	fmt.Println("Starting AWS SSO session")
 	return nil
 }
 
 // StartDeviceAuthorization inicia el flujo de autorización del dispositivo
 func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clientSecret string) (*DeviceAuthorization, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Starting device authorization", "client_id", clientID, "start_url", s.StartURL)
+
 	input := &ssooidc.StartDeviceAuthorizationInput{
 		ClientId:     aws.String(clientID),
 		ClientSecret: aws.String(clientSecret),
@@ -26,29 +32,41 @@ func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clie
 
 	output, err := s.oidcClient.StartDeviceAuthorization(ctx, input)
 	if err != nil {
+		logger.Errorw("Failed to start device authorization", "client_id", clientID, "error", err)
 		return nil, fmt.Errorf("failed to start device authorization: %w", err)
 	}
 
-	return &DeviceAuthorization{
+	auth := &DeviceAuthorization{
 		DeviceCode:              aws.ToString(output.DeviceCode),
 		UserCode:                aws.ToString(output.UserCode),
 		VerificationURI:         aws.ToString(output.VerificationUri),
 		VerificationURIComplete: aws.ToString(output.VerificationUriComplete),
 		ExpiresIn:               output.ExpiresIn,
 		Interval:                output.Interval,
-	}, nil
+	}
+
+	logger.Infow("Device authorization started", "user_code", auth.UserCode, "verification_uri", auth.VerificationURI, "expires_in", auth.ExpiresIn)
+	return auth, nil
 }
 
 // CreateToken hace polling hasta que el usuario autorice o expire el tiempo
 func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, deviceCode string, interval int32) (*TokenResponse, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Starting token creation polling", "client_id", clientID, "interval", interval)
+
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
+	pollCount := 0
 
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Debug("Token creation cancelled by context")
 			return nil, ctx.Err()
 		case <-ticker.C:
+			pollCount++
+			logger.Debugw("Polling for token", "attempt", pollCount)
+
 			input := &ssooidc.CreateTokenInput{
 				ClientId:     aws.String(clientID),
 				ClientSecret: aws.String(clientSecret),
@@ -60,24 +78,31 @@ func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, dev
 			if err != nil {
 				// Si es AuthorizationPendingException, continuar polling
 				if isAuthorizationPending(err) {
+					logger.Debugw("Authorization still pending", "attempt", pollCount)
 					continue
 				}
 				// Si es SlowDownException, aumentar el intervalo
 				if isSlowDown(err) {
-					ticker.Reset(time.Duration(interval+5) * time.Second)
+					newInterval := interval + 5
+					logger.Debugw("Rate limited, increasing interval", "old_interval", interval, "new_interval", newInterval)
+					ticker.Reset(time.Duration(newInterval) * time.Second)
 					continue
 				}
 				// Cualquier otro error, fallar
+				logger.Errorw("Failed to create token", "attempt", pollCount, "error", err)
 				return nil, fmt.Errorf("failed to create token: %w", err)
 			}
 
 			// Token obtenido exitosamente
-			return &TokenResponse{
+			token := &TokenResponse{
 				AccessToken:  aws.ToString(output.AccessToken),
 				ExpiresIn:    output.ExpiresIn,
 				TokenType:    aws.ToString(output.TokenType),
 				RefreshToken: aws.ToString(output.RefreshToken),
-			}, nil
+			}
+
+			logger.Infow("Token created successfully", "attempts", pollCount, "expires_in", token.ExpiresIn)
+			return token, nil
 		}
 	}
 }

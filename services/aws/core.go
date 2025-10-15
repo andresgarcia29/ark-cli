@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/andresgarcia29/ark-cli/logs"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -19,17 +20,24 @@ type SSOClient struct {
 }
 
 func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Creating new SSO client", "region", region, "start_url", startURL)
+
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
+		logger.Errorw("Failed to load SDK config", "region", region, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 
-	return &SSOClient{
+	client := &SSOClient{
 		oidcClient: ssooidc.NewFromConfig(cfg),
 		ssoClient:  sso.NewFromConfig(cfg), // Agregar esta línea
 		Region:     region,
 		StartURL:   startURL,
-	}, nil
+	}
+
+	logger.Debugw("SSO client created successfully", "region", region, "start_url", startURL)
+	return client, nil
 }
 
 // ClientRegistration contiene la información del cliente registrado
@@ -41,6 +49,9 @@ type ClientRegistration struct {
 
 // RegisterClient registra la aplicación como cliente con AWS SSO
 func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, error) {
+	logger := logs.GetLogger()
+	logger.Debug("Registering client with AWS SSO")
+
 	input := &ssooidc.RegisterClientInput{
 		ClientName: aws.String("x-cli"),
 		ClientType: aws.String("public"),
@@ -48,14 +59,18 @@ func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, er
 
 	output, err := s.oidcClient.RegisterClient(ctx, input)
 	if err != nil {
+		logger.Errorw("Failed to register client", "error", err)
 		return nil, fmt.Errorf("failed to register client: %w", err)
 	}
 
-	return &ClientRegistration{
+	registration := &ClientRegistration{
 		ClientID:     aws.ToString(output.ClientId),
 		ClientSecret: aws.ToString(output.ClientSecret),
 		ExpiresAt:    output.ClientSecretExpiresAt,
-	}, nil
+	}
+
+	logger.Debugw("Client registered successfully", "client_id", registration.ClientID, "expires_at", registration.ExpiresAt)
+	return registration, nil
 }
 
 // DeviceAuthorization contiene la información de autorización del dispositivo
@@ -151,16 +166,23 @@ type EKSClient struct {
 
 // NewEKSClient crea una nueva instancia de EKSClient
 func NewEKSClient(ctx context.Context, region, profile string) (*EKSClient, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Creating new EKS client", "region", region, "profile", profile)
+
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(region),
 		config.WithSharedConfigProfile(profile),
 	)
 	if err != nil {
+		logger.Errorw("Failed to load SDK config for EKS client", "region", region, "profile", profile, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 
-	return &EKSClient{
+	client := &EKSClient{
 		client: eks.NewFromConfig(cfg),
 		region: region,
-	}, nil
+	}
+
+	logger.Debugw("EKS client created successfully", "region", region, "profile", profile)
+	return client, nil
 }

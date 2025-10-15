@@ -33,15 +33,6 @@ func kubernetes(cmd *cobra.Command, args []string) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Test kubectl availability first
-	fmt.Println("🔍 Checking kubectl availability...")
-	if err := testKubectlAvailability(); err != nil {
-		fmt.Printf("❌ kubectl is not available or not working: %v\n", err)
-		fmt.Println("💡 Please ensure kubectl is installed and configured properly")
-		return
-	}
-	fmt.Println("✅ kubectl is available")
-
 	// Mostrar selector interactivo de clusters with timeout
 	fmt.Println("🔍 Loading cluster contexts...")
 	selectedCluster, err := interactiveClusterSelectorWithTimeout(timeoutCtx)
@@ -119,19 +110,6 @@ func assumeRoleForCluster(ctx context.Context, cluster *services_kubernetes.Clus
 	}
 
 	fmt.Printf("✅ Successfully assumed role for profile: %s\n", cluster.Profile)
-	return nil
-}
-
-// testKubectlAvailability tests if kubectl is available and working
-func testKubectlAvailability() error {
-	// Test basic kubectl command
-	clusters, err := services_kubernetes.GetClusterContexts()
-	if err != nil {
-		return fmt.Errorf("kubectl is not working properly: %w", err)
-	}
-
-	// If we get here, kubectl is working
-	_ = clusters // We don't need to use the clusters, just test if the call works
 	return nil
 }
 

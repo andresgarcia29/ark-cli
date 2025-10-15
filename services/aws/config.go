@@ -6,28 +6,39 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/andresgarcia29/ark-cli/logs"
 )
 
 // WriteConfigFile escribe los perfiles al archivo ~/.aws/config
 func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
+	logger := logs.GetLogger()
+	logger.Infow("Writing config file", "profiles_count", len(profiles), "start_url", s.StartURL, "region", s.Region)
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		logger.Errorw("Failed to get home directory", "error", err)
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configDir := filepath.Join(homeDir, ".aws")
 	configPath := filepath.Join(configDir, "config")
+	logger.Debugw("Config file path", "path", configPath)
 
 	// Crear directorio si no existe
+	logger.Debugw("Ensuring .aws directory exists", "path", configDir)
 	if err := os.MkdirAll(configDir, 0700); err != nil {
+		logger.Errorw("Failed to create .aws directory", "path", configDir, "error", err)
 		return fmt.Errorf("failed to create .aws directory: %w", err)
 	}
 
 	// Generar contenido del archivo
 	var content strings.Builder
+	logger.Debug("Generating config file content")
 
 	for _, profile := range profiles {
 		profileName := generateProfileName(profile.AccountName, profile.RoleName)
+		logger.Debugw("Writing profile", "profile_name", profileName, "account_id", profile.AccountID, "role_name", profile.RoleName)
 
 		content.WriteString(fmt.Sprintf("[profile %s]\n", profileName))
 		content.WriteString(fmt.Sprintf("sso_start_url = %s\n", s.StartURL))
@@ -38,11 +49,16 @@ func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
 		content.WriteString("\n") // Línea en blanco entre perfiles
 	}
 
+	logger.Debugw("Generated config file content", "total_profiles", len(profiles))
+
 	// Escribir archivo
+	logger.Debugw("Writing config file", "path", configPath)
 	if err := os.WriteFile(configPath, []byte(content.String()), 0600); err != nil {
+		logger.Errorw("Failed to write config file", "path", configPath, "error", err)
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
+	logger.Infow("Config file written successfully", "path", configPath, "profiles_count", len(profiles))
 	return nil
 }
 
@@ -66,15 +82,21 @@ func generateProfileName(accountName, roleName string) string {
 
 // ReadProfileFromConfig lee un perfil específico del archivo ~/.aws/config
 func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Reading profile from config", "profile", profileName)
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		logger.Errorw("Failed to get home directory", "error", err)
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(homeDir, ".aws", "config")
+	logger.Debugw("Config file path", "path", configPath)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		logger.Errorw("Failed to read config file", "path", configPath, "error", err)
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
@@ -134,18 +156,23 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	}
 
 	if !found {
+		logger.Warnw("Profile not found in config", "profile", profileName)
 		return nil, fmt.Errorf("profile %s not found in config", profileName)
 	}
 
 	// Determinar el tipo de perfil basado en las propiedades encontradas
 	if profileConfig.RoleARN != "" {
 		profileConfig.ProfileType = ProfileTypeAssumeRole
+		logger.Debugw("Profile type determined", "profile", profileName, "type", "assume_role")
 	} else if profileConfig.StartURL != "" {
 		profileConfig.ProfileType = ProfileTypeSSO
+		logger.Debugw("Profile type determined", "profile", profileName, "type", "sso")
 	} else {
+		logger.Errorw("Profile type could not be determined", "profile", profileName)
 		return nil, fmt.Errorf("profile %s is neither SSO nor assume role profile", profileName)
 	}
 
+	logger.Debugw("Profile configuration loaded successfully", "profile", profileName, "type", profileConfig.ProfileType)
 	return profileConfig, nil
 }
 

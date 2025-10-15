@@ -59,23 +59,23 @@ func GetClusterContexts() ([]ClusterContext, error) {
 		if name != "" {
 			logger.Debugw("Processing context", "name", name)
 			// Get detailed context information including profile
-			profile, region, clusterName, err := getContextDetails(name)
-			if err != nil {
-				logger.Warnw("Failed to get context details, using empty values", "context", name, "error", err)
-				// If we can't get context details, continue with empty values
-				profile = ""
-				region = ""
-				clusterName = ""
-			} else {
-				logger.Debugw("Context details retrieved", "context", name, "profile", profile, "region", region, "cluster", clusterName)
-			}
+			// profile, region, clusterName, err := getContextDetails(name)
+			// if err != nil {
+			// 	logger.Warnw("Failed to get context details, using empty values", "context", name, "error", err)
+			// 	// If we can't get context details, continue with empty values
+			// 	profile = ""
+			// 	region = ""
+			// 	clusterName = ""
+			// } else {
+			// 	logger.Debugw("Context details retrieved", "context", name, "profile", profile, "region", region, "cluster", clusterName)
+			// }
 
 			context := ClusterContext{
-				Name:        name,
-				Current:     name == currentContext,
-				Profile:     profile,
-				Region:      region,
-				ClusterName: clusterName,
+				Name:    name,
+				Current: name == currentContext,
+				// Profile:     profile,
+				// Region:      region,
+				// ClusterName: clusterName,
 			}
 			contexts = append(contexts, context)
 			logger.Debugw("Context added to results", "context", context)
