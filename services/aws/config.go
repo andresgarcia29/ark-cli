@@ -305,6 +305,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 // SelectProfilesPerAccount selecciona un perfil por cuenta, priorizando ReadOnlyAccess
 func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[string]ProfileConfig {
 	accountProfiles := make(map[string][]ProfileConfig)
+	fmt.Println("SelectProfilesPerAccount")
 
 	// Agrupar perfiles por cuenta
 	for _, profile := range profiles {
@@ -321,7 +322,11 @@ func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[st
 		// Buscar ReadOnlyAccess primero
 		for _, profile := range accountProfileList {
 			roleName := strings.ToLower(profile.RoleName)
-			if slices.Contains(prefixs, roleName) {
+			found := slices.ContainsFunc(prefixs, func(p string) bool {
+				return strings.Contains(roleName, p)
+			})
+			if found {
+				fmt.Println("profile found", profile)
 				selected = profile
 				foundReadOnly = true
 				break
