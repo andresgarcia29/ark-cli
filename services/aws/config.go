@@ -80,27 +80,8 @@ func generateProfileName(accountName, roleName string) string {
 	return result.String()
 }
 
-// ReadProfileFromConfig lee un perfil específico del archivo ~/.aws/config
-func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
-	logger := logs.GetLogger()
-	logger.Debugw("Reading profile from config", "profile", profileName)
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		logger.Errorw("Failed to get home directory", "error", err)
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	configPath := filepath.Join(homeDir, ".aws", "config")
-	logger.Debugw("Config file path", "path", configPath)
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		logger.Errorw("Failed to read config file", "path", configPath, "error", err)
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	// Parsear el archivo INI manualmente
+// parseProfileFromConfigData parsea un perfil específico desde los datos de un archivo de configuración
+func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig, error) {
 	lines := strings.Split(string(data), "\n")
 	var currentProfile string
 	profileConfig := &ProfileConfig{
@@ -156,20 +137,63 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	}
 
 	if !found {
-		logger.Warnw("Profile not found in config", "profile", profileName)
-		return nil, fmt.Errorf("profile %s not found in config", profileName)
+		return nil, nil
 	}
 
 	// Determinar el tipo de perfil basado en las propiedades encontradas
 	if profileConfig.RoleARN != "" {
 		profileConfig.ProfileType = ProfileTypeAssumeRole
-		logger.Debugw("Profile type determined", "profile", profileName, "type", "assume_role")
 	} else if profileConfig.StartURL != "" {
 		profileConfig.ProfileType = ProfileTypeSSO
-		logger.Debugw("Profile type determined", "profile", profileName, "type", "sso")
 	} else {
-		logger.Errorw("Profile type could not be determined", "profile", profileName)
 		return nil, fmt.Errorf("profile %s is neither SSO nor assume role profile", profileName)
+	}
+
+	return profileConfig, nil
+}
+
+// ReadProfileFromConfig lee un perfil específico del archivo ~/.aws/config y ~/.aws/custom_config
+func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
+	logger := logs.GetLogger()
+	logger.Debugw("Reading profile from config", "profile", profileName)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		logger.Errorw("Failed to get home directory", "error", err)
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	// Primero intentar leer de custom_config si existe (tiene prioridad)
+	customConfigPath := filepath.Join(homeDir, ".aws", "custom_config")
+	if data, err := os.ReadFile(customConfigPath); err == nil {
+		logger.Debugw("Reading from custom_config", "path", customConfigPath)
+		if profileConfig, err := parseProfileFromConfigData(data, profileName); err == nil && profileConfig != nil {
+			logger.Debugw("Profile found in custom_config", "profile", profileName, "type", profileConfig.ProfileType)
+			return profileConfig, nil
+		}
+	} else if !os.IsNotExist(err) {
+		logger.Warnw("Error reading custom_config (will continue with main config)", "path", customConfigPath, "error", err)
+	}
+
+	// Si no se encontró en custom_config, leer de config principal
+	configPath := filepath.Join(homeDir, ".aws", "config")
+	logger.Debugw("Reading from main config", "path", configPath)
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		logger.Errorw("Failed to read config file", "path", configPath, "error", err)
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	profileConfig, err := parseProfileFromConfigData(data, profileName)
+	if err != nil {
+		logger.Errorw("Failed to parse profile", "profile", profileName, "error", err)
+		return nil, err
+	}
+
+	if profileConfig == nil {
+		logger.Warnw("Profile not found in config", "profile", profileName)
+		return nil, fmt.Errorf("profile %s not found in config", profileName)
 	}
 
 	logger.Debugw("Profile configuration loaded successfully", "profile", profileName, "type", profileConfig.ProfileType)
@@ -218,20 +242,8 @@ func ResolveSSOConfiguration(profileName string) (ssoRegion, ssoStartURL string,
 	return "", "", fmt.Errorf("profile %s does not have SSO configuration (type: %s)", profileName, profileConfig.ProfileType)
 }
 
-// ReadAllProfilesFromConfig lee todos los perfiles del archivo ~/.aws/config
-func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	configPath := filepath.Join(homeDir, ".aws", "config")
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
+// parseAllProfilesFromConfigData parsea todos los perfiles desde los datos de un archivo de configuración
+func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 	var profiles []ProfileConfig
 	lines := strings.Split(string(data), "\n")
 	var currentProfile *ProfileConfig
@@ -299,6 +311,64 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		profiles = append(profiles, *currentProfile)
 	}
 
+	return profiles, nil
+}
+
+// ReadAllProfilesFromConfig lee todos los perfiles del archivo ~/.aws/config y ~/.aws/custom_config
+// Los perfiles de custom_config tienen prioridad sobre los de config principal
+func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
+	logger := logs.GetLogger()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	// Leer perfiles del archivo config principal
+	configPath := filepath.Join(homeDir, ".aws", "config")
+	profilesMap := make(map[string]ProfileConfig)
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		logger.Warnw("Failed to read main config file (will try custom_config)", "path", configPath, "error", err)
+	} else {
+		logger.Debugw("Reading profiles from main config", "path", configPath)
+		profiles, err := parseAllProfilesFromConfigData(data)
+		if err != nil {
+			logger.Warnw("Failed to parse main config (will try custom_config)", "error", err)
+		} else {
+			// Agregar perfiles del config principal al mapa
+			for _, profile := range profiles {
+				profilesMap[profile.ProfileName] = profile
+			}
+			logger.Debugw("Loaded profiles from main config", "count", len(profiles))
+		}
+	}
+
+	// Leer perfiles del archivo custom_config si existe (tiene prioridad)
+	customConfigPath := filepath.Join(homeDir, ".aws", "custom_config")
+	if data, err := os.ReadFile(customConfigPath); err == nil {
+		logger.Debugw("Reading profiles from custom_config", "path", customConfigPath)
+		customProfiles, err := parseAllProfilesFromConfigData(data)
+		if err != nil {
+			logger.Warnw("Failed to parse custom_config", "error", err)
+		} else {
+			// Los perfiles de custom_config sobrescriben o agregan a los del config principal
+			for _, profile := range customProfiles {
+				profilesMap[profile.ProfileName] = profile
+			}
+			logger.Debugw("Merged profiles from custom_config", "count", len(customProfiles), "total", len(profilesMap))
+		}
+	} else if !os.IsNotExist(err) {
+		logger.Warnw("Error reading custom_config (will continue with main config only)", "path", customConfigPath, "error", err)
+	}
+
+	// Convertir el mapa a slice
+	var profiles []ProfileConfig
+	for _, profile := range profilesMap {
+		profiles = append(profiles, profile)
+	}
+
+	logger.Debugw("Total profiles loaded", "count", len(profiles))
 	return profiles, nil
 }
 
