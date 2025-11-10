@@ -11,6 +11,15 @@ A powerful command-line interface for AWS and Kubernetes operations, designed to
 
 ## Installation
 
+### Using brew
+
+```bash
+brew update
+brew tap andresgarcia29/agm --force
+brew upgrade ark --cask
+sudo xattr -r -d com.apple.quarantine $(which ark)
+```
+
 ### Using Go
 ```bash
 go install github.com/andresgarcia29/ark-cli@latest
