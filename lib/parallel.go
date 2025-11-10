@@ -179,7 +179,7 @@ func ExecuteWithRetry(ctx context.Context, config ParallelConfig, operation func
 	}
 
 	// All attempts failed
-	logger.Errorw("Operation failed after all retries",
+	logger.Warnw("Operation failed after all retries",
 		"attempts", config.MaxRetries+1,
 		"error", lastErr)
 	return fmt.Errorf("operation failed after %d attempts: %w", config.MaxRetries+1, lastErr)

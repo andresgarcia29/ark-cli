@@ -375,7 +375,6 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 // SelectProfilesPerAccount selecciona un perfil por cuenta, priorizando ReadOnlyAccess
 func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[string]ProfileConfig {
 	accountProfiles := make(map[string][]ProfileConfig)
-	fmt.Println("SelectProfilesPerAccount")
 
 	// Agrupar perfiles por cuenta
 	for _, profile := range profiles {
