@@ -203,3 +203,70 @@ func TestSelectProfilesPerAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectProfileByARN(t *testing.T) {
+	profiles := []ProfileConfig{
+		{
+			AccountID:   "123456789012",
+			ProfileName: "account1-role1",
+			RoleARN:     "arn:aws:iam::123456789012:role/Role1",
+		},
+		{
+			AccountID:   "123456789012",
+			ProfileName: "account1-role2",
+			RoleARN:     "arn:aws:iam::123456789012:role/Role2",
+		},
+		{
+			AccountID:   "987654321098",
+			ProfileName: "account2-role1",
+			RoleARN:     "arn:aws:iam::987654321098:role/Role1",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		roleARN  string
+		expected map[string]ProfileConfig
+	}{
+		{
+			name:    "match existing ARN",
+			roleARN: "arn:aws:iam::123456789012:role/Role1",
+			expected: map[string]ProfileConfig{
+				"123456789012": {
+					AccountID:   "123456789012",
+					ProfileName: "account1-role1",
+					RoleARN:     "arn:aws:iam::123456789012:role/Role1",
+				},
+			},
+		},
+		{
+			name:    "match another account ARN",
+			roleARN: "arn:aws:iam::987654321098:role/Role1",
+			expected: map[string]ProfileConfig{
+				"987654321098": {
+					AccountID:   "987654321098",
+					ProfileName: "account2-role1",
+					RoleARN:     "arn:aws:iam::987654321098:role/Role1",
+				},
+			},
+		},
+		{
+			name:     "no match",
+			roleARN:  "arn:aws:iam::123456789012:role/NonExistent",
+			expected: map[string]ProfileConfig{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SelectProfileByARN(profiles, tt.roleARN)
+
+			assert.Equal(t, len(tt.expected), len(result))
+			for accountID, expectedProfile := range tt.expected {
+				actualProfile, exists := result[accountID]
+				assert.True(t, exists)
+				assert.Equal(t, expectedProfile.RoleARN, actualProfile.RoleARN)
+			}
+		})
+	}
+}

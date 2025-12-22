@@ -1,44 +1,44 @@
 # AWS Menu Package
 
-Este paquete contiene toda la lógica de visualización e interfaz de usuario para la selección de perfiles de AWS.
+This package contains all the display and user interface logic for AWS profile selection.
 
-## Estructura
+## Structure
 
-- `selector.go`: Implementación del selector interactivo de perfiles usando Bubble Tea
+- `selector.go`: Implementation of the interactive profile selector using Bubble Tea
 
-## Responsabilidades
+## Responsibilities
 
-- **Interfaz de Usuario**: Manejo de la interfaz interactiva con Bubble Tea
-- **Visualización**: Formateo y presentación de perfiles de AWS
-- **Navegación**: Control de teclado y selección de perfiles
-- **Estilos**: Aplicación de colores y estilos con Lip Gloss
+- **User Interface**: Handling the interactive interface with Bubble Tea
+- **Display**: Formatting and presentation of AWS profiles
+- **Navigation**: Keyboard control and profile selection
+- **Styles**: Application of colors and styles with Lip Gloss
 
-## Separación de Responsabilidades
+## Separation of Responsibilities
 
-Este paquete se enfoca únicamente en la **presentación** y **interacción** del usuario. La lógica de negocio permanece en `services/aws`:
+This package focuses solely on **presentation** and user **interaction**. The business logic remains in `services/aws`:
 
-- `services/aws`: Lógica de negocio, configuración, autenticación
-- `lib/menu/aws`: Interfaz de usuario, visualización, interacción
+- `services/aws`: Business logic, configuration, authentication
+- `lib/animation`: User interface, display, interaction
 
-## Uso
+## Usage
 
 ```go
-import aws_menu "github.com/andresgarcia29/ark-cli/lib/menu/aws"
+import "github.com/andresgarcia29/ark-cli/lib/animation"
 
-// Mostrar selector interactivo
-selectedProfile, err := aws_menu.InteractiveProfileSelector()
+// Show interactive selector
+selectedProfile, err := animation.InteractiveProfileSelector()
 if err != nil {
-    // Manejar error
+    // Handle error
 }
 
-// Usar el perfil seleccionado
+// Use selected profile
 fmt.Printf("Selected: %s\n", selectedProfile.ProfileName)
 ```
 
-## Características
+## Features
 
-- **Bubble Tea**: Framework moderno para TUI
-- **Lip Gloss**: Estilos y colores para terminal
-- **Navegación intuitiva**: Flechas, vim keys (j/k)
-- **Colores diferenciados**: SSO (verde), Assume Role (naranja)
-- **Información detallada**: Cuenta, rol, región
+- **Bubble Tea**: Modern framework for TUI
+- **Lip Gloss**: Terminal styles and colors
+- **Intuitive Navigation**: Arrows, vim keys (j/k)
+- **Differentiated Colors**: SSO (green), Assume Role (orange)
+- **Detailed Information**: Account, role, region

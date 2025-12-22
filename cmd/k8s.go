@@ -33,7 +33,7 @@ func kubernetes(cmd *cobra.Command, args []string) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Mostrar selector interactivo de clusters with timeout
+	// Show interactive cluster selector with timeout
 	fmt.Println("🔍 Loading cluster contexts...")
 	selectedCluster, err := interactiveClusterSelectorWithTimeout(timeoutCtx)
 	if err != nil {
@@ -50,7 +50,7 @@ func kubernetes(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Mostrar información del cluster seleccionado
+	// Show selected cluster information
 	fmt.Printf("\n✅ Selected cluster: %s", selectedCluster.Name)
 	if selectedCluster.Current {
 		fmt.Printf(" (currently active)")
@@ -66,11 +66,11 @@ func kubernetes(cmd *cobra.Command, args []string) {
 	selectedCluster.Region = region
 	selectedCluster.ClusterName = clusterName
 
-	// Si el cluster ya está activo, verificar si necesitamos asumir el rol
+	// If the cluster is already active, check if we need to assume the role
 	if selectedCluster.Current {
 		fmt.Println("🎉 This cluster is already active!")
 
-		// Si hay un perfil asociado, verificar si necesitamos asumir el rol
+		// If there is an associated profile, check if we need to assume the role
 		if selectedCluster.Profile != "" {
 			fmt.Printf("🔍 Checking if we need to assume role for profile: %s\n", selectedCluster.Profile)
 			if err := assumeRoleForCluster(ctx, selectedCluster); err != nil {
@@ -81,7 +81,7 @@ func kubernetes(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Si hay un perfil asociado, asumir el rol antes de cambiar de contexto
+	// If there is an associated profile, assume the role before switching context
 	if selectedCluster.Profile != "" {
 		fmt.Printf("🔐 Assuming role for profile: %s\n", selectedCluster.Profile)
 		if err := assumeRoleForCluster(ctx, selectedCluster); err != nil {
@@ -107,13 +107,13 @@ func assumeRoleForCluster(ctx context.Context, cluster *services_kubernetes.Clus
 		return fmt.Errorf("no profile associated with cluster %s", cluster.Name)
 	}
 
-	// Resolver configuración SSO (puede venir del source profile para assume role)
+	// Resolve SSO configuration (can come from source profile for assume role)
 	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(cluster.Profile)
 	if err != nil {
 		return fmt.Errorf("error resolving SSO configuration for profile %s: %w", cluster.Profile, err)
 	}
 
-	// Realizar login con el perfil usando retry
+	// Perform login with the profile using retry
 	if err := controllers.AttemptLoginWithRetry(ctx, cluster.Profile, true, ssoRegion, ssoStartURL); err != nil {
 		return fmt.Errorf("failed to login with profile %s: %w", cluster.Profile, err)
 	}

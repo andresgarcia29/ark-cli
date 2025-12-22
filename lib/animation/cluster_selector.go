@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ClusterDisplayInfo contiene información para mostrar en la lista interactiva
+// ClusterDisplayInfo contains information to show in the interactive list
 type ClusterDisplayInfo struct {
 	Name        string
 	Current     bool
@@ -19,38 +19,38 @@ type ClusterDisplayInfo struct {
 	ClusterName string
 }
 
-// clusterSelectorModel representa el modelo para el selector de clusters con Bubble Tea
+// clusterSelectorModel represents the model for the cluster selector with Bubble Tea
 type clusterSelectorModel struct {
 	clusters         []services_kubernetes.ClusterContext
 	filteredClusters []services_kubernetes.ClusterContext
 	cursor           int
-	offset           int // Índice del primer cluster visible
-	visibleLines     int // Número máximo de clusters a mostrar
+	offset           int // Index of the first visible cluster
+	visibleLines     int // Maximum number of clusters to show
 	searchQuery      string
 	selected         *services_kubernetes.ClusterContext
 	quitting         bool
 	searchMode       bool
 }
 
-// initialClusterSelectorModel crea el modelo inicial para el selector
+// initialClusterSelectorModel creates the initial model for the selector
 func initialClusterSelectorModel(clusters []services_kubernetes.ClusterContext) clusterSelectorModel {
 	return clusterSelectorModel{
 		clusters:         clusters,
 		filteredClusters: clusters,
 		cursor:           0,
 		offset:           0,
-		visibleLines:     10, // Mostrar máximo 10 clusters
+		visibleLines:     10, // Show maximum 10 clusters
 		searchQuery:      "",
-		searchMode:       true, // Iniciar en modo búsqueda
+		searchMode:       true, // Start in search mode
 	}
 }
 
-// Init implementa el método Init de tea.Model
+// Init implements the tea.Model Init method
 func (m clusterSelectorModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update implementa el método Update de tea.Model
+// Update implements the tea.Model Update method
 func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -60,14 +60,14 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "/":
-			// Activar modo búsqueda
+			// Activate search mode
 			m.searchMode = true
 			m.searchQuery = ""
 			return m, nil
 
 		case "esc":
 			if m.searchMode {
-				// Salir del modo búsqueda
+				// Exit search mode
 				m.searchMode = false
 				m.searchQuery = ""
 				m.filteredClusters = m.clusters
@@ -79,7 +79,7 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			// Alternar entre modo búsqueda y vista completa
+			// Toggle between search mode and full view
 			if m.searchMode {
 				m.searchMode = false
 				m.searchQuery = ""
@@ -96,11 +96,11 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if m.searchMode && len(m.filteredClusters) > 0 {
-				// Si hay resultados, seleccionar el primero
+				// If there are results, select the first one
 				m.selected = &m.filteredClusters[m.cursor]
 				return m, tea.Quit
 			} else if !m.searchMode && len(m.filteredClusters) > 0 {
-				// Seleccionar cluster
+				// Select cluster
 				m.selected = &m.filteredClusters[m.cursor]
 				return m, tea.Quit
 			}
@@ -116,7 +116,7 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				// Ajustar offset para mantener el cursor visible
+				// Adjust offset to keep the cursor visible
 				if m.cursor < m.offset {
 					m.offset = m.cursor
 				}
@@ -125,7 +125,7 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.filteredClusters)-1 {
 				m.cursor++
-				// Ajustar offset para mantener el cursor visible
+				// Adjust offset to keep the cursor visible
 				currentVisibleLines := m.getCurrentVisibleLines()
 				if m.cursor >= m.offset+currentVisibleLines {
 					m.offset = m.cursor - currentVisibleLines + 1
@@ -133,7 +133,7 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		default:
-			// Si estamos en modo búsqueda, agregar caracteres
+			// If in search mode, add characters
 			if m.searchMode && len(msg.String()) == 1 {
 				m.searchQuery += msg.String()
 				m.filterClusters()
@@ -144,13 +144,13 @@ func (m clusterSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// getCurrentVisibleLines calcula cuántas líneas mostrar actualmente
+// getCurrentVisibleLines calculates how many lines to show currently
 func (m clusterSelectorModel) getCurrentVisibleLines() int {
-	// Siempre limitar a máximo 10 resultados
+	// Always limit to maximum 10 results
 	return min(m.visibleLines, len(m.filteredClusters))
 }
 
-// filterClusters filtra los clusters basado en la consulta de búsqueda
+// filterClusters filters clusters based on the search query
 func (m *clusterSelectorModel) filterClusters() {
 	if m.searchQuery == "" {
 		m.filteredClusters = m.clusters
@@ -161,19 +161,19 @@ func (m *clusterSelectorModel) filterClusters() {
 	query := strings.ToLower(m.searchQuery)
 
 	for _, cluster := range m.clusters {
-		// Buscar en nombre del cluster
+		// Search by cluster name
 		if strings.Contains(strings.ToLower(cluster.Name), query) {
 			filtered = append(filtered, cluster)
 		}
 	}
 
 	m.filteredClusters = filtered
-	// Resetear cursor y offset cuando cambian los clusters filtrados
+	// Reset cursor and offset when filtered clusters change
 	m.cursor = 0
 	m.offset = 0
 }
 
-// View implementa el método View de tea.Model
+// View implements the tea.Model View method
 func (m clusterSelectorModel) View() string {
 	if m.quitting {
 		return ""
@@ -227,7 +227,7 @@ func (m clusterSelectorModel) View() string {
 		s.WriteString(countStyle.Render(fmt.Sprintf("Found %d of %d clusters", len(m.filteredClusters), len(m.clusters))))
 		s.WriteString("\n\n")
 	} else if len(m.filteredClusters) > m.visibleLines {
-		// Mostrar indicador de scroll cuando hay más clusters
+		// Show scroll indicator when there are more clusters
 		countStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			Italic(true)
@@ -245,12 +245,12 @@ func (m clusterSelectorModel) View() string {
 		return s.String()
 	}
 
-	// Calcular ventana de visualización
+	// Calculate display window
 	currentVisibleLines := m.getCurrentVisibleLines()
 	startDisplay := m.offset
 	endDisplay := min(m.offset+currentVisibleLines, len(m.filteredClusters))
 
-	// Mostrar indicador si hay clusters arriba
+	// Show indicator if there are clusters above
 	if m.offset > 0 {
 		ellipsisStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -259,7 +259,7 @@ func (m clusterSelectorModel) View() string {
 		s.WriteString("\n")
 	}
 
-	// Renderizar clusters en la ventana visible
+	// Render clusters in the visible window
 	for i := startDisplay; i < endDisplay; i++ {
 		cluster := m.filteredClusters[i]
 		cursor := " "
@@ -319,7 +319,7 @@ func (m clusterSelectorModel) View() string {
 		s.WriteString("\n")
 	}
 
-	// Mostrar indicador si hay clusters abajo
+	// Show indicator if there are clusters below
 	if endDisplay < len(m.filteredClusters) {
 		ellipsisStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -331,7 +331,7 @@ func (m clusterSelectorModel) View() string {
 	return s.String()
 }
 
-// formatClusterDisplay formatea la información del cluster para mostrar
+// formatClusterDisplay formats the cluster information for display
 func formatClusterDisplay(cluster services_kubernetes.ClusterContext) ClusterDisplayInfo {
 	status := ""
 	if cluster.Current {
@@ -348,9 +348,9 @@ func formatClusterDisplay(cluster services_kubernetes.ClusterContext) ClusterDis
 	}
 }
 
-// InteractiveClusterSelector permite seleccionar un cluster de forma interactiva usando Bubble Tea
+// InteractiveClusterSelector allows selecting a cluster interactively using Bubble Tea
 func InteractiveClusterSelector() (*services_kubernetes.ClusterContext, error) {
-	// Obtener todos los clusters
+	// Get all clusters
 	clusters, err := services_kubernetes.GetClusterContexts()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cluster contexts: %w", err)
@@ -360,7 +360,7 @@ func InteractiveClusterSelector() (*services_kubernetes.ClusterContext, error) {
 		return nil, fmt.Errorf("no cluster contexts found in kubeconfig")
 	}
 
-	// Crear y ejecutar el programa Bubble Tea
+	// Create and run the Bubble Tea program
 	model := initialClusterSelectorModel(clusters)
 	program := tea.NewProgram(model)
 
@@ -369,7 +369,7 @@ func InteractiveClusterSelector() (*services_kubernetes.ClusterContext, error) {
 		return nil, fmt.Errorf("error running cluster selector: %w", err)
 	}
 
-	// Verificar si se seleccionó un cluster
+	// Check if a cluster was selected
 	if finalModel.(clusterSelectorModel).selected == nil {
 		return nil, fmt.Errorf("no cluster selected")
 	}

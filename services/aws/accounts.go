@@ -23,7 +23,7 @@ func (s *SSOClient) ListAccounts(ctx context.Context, accessToken string) ([]Acc
 
 		input := &sso.ListAccountsInput{
 			AccessToken: aws.String(accessToken),
-			MaxResults:  aws.Int32(100), // Máximo permitido por página
+			MaxResults:  aws.Int32(100), // Maximum allowed per page
 			NextToken:   nextToken,
 		}
 
@@ -35,7 +35,7 @@ func (s *SSOClient) ListAccounts(ctx context.Context, accessToken string) ([]Acc
 
 		logger.Debugw("Accounts page retrieved", "page", pageCount, "accounts_in_page", len(output.AccountList))
 
-		// Agregar cuentas de esta página
+		// Add accounts from this page
 		for _, acc := range output.AccountList {
 			account := Account{
 				AccountID:    aws.ToString(acc.AccountId),
@@ -46,7 +46,7 @@ func (s *SSOClient) ListAccounts(ctx context.Context, accessToken string) ([]Acc
 			logger.Debugw("Account added", "account_id", account.AccountID, "account_name", account.AccountName)
 		}
 
-		// Si no hay más páginas, terminar
+		// If there are no more pages, terminate
 		if output.NextToken == nil {
 			logger.Debug("No more pages to fetch")
 			break

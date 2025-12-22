@@ -1,13 +1,18 @@
 # ark-cli
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/andresgarcia29/ark-cli)](https://goreportcard.com/report/github.com/andresgarcia29/ark-cli)
+[![Coverage Status](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/andresgarcia29/ark-cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A powerful command-line interface for AWS and Kubernetes operations, designed to streamline your cloud workflow.
 
 ## Features
 
 - **AWS Operations**: Login, SSO, and credential management
 - **Kubernetes Integration**: Seamless k8s operations
-- **Parallel Processing**: Efficient handling of multiple operations
+- **Parallel Processing**: Efficient handling of multiple operations (see [PARALLELIZATION.md](PARALLELIZATION.md))
 - **Cross-Platform**: Works on Linux, macOS, and Windows
+- **Auto-Browser**: Automatically opens browser for AWS SSO authentication
 
 ## Installation
 
@@ -25,43 +30,48 @@ sudo xattr -r -d com.apple.quarantine $(which ark)
 go install github.com/andresgarcia29/ark-cli@latest
 ```
 
-### Download Binary
-Download the appropriate binary for your platform from the [releases page](https://github.com/andresgarcia29/ark-cli/releases).
+---
 
-## Quick Start
+## Detailed Command Guide
 
-### AWS Operations
+### ☁️ AWS Commands
 
-#### Login to AWS
-```bash
-ark aws login --profile my-profile
-```
+#### `ark aws`
+Interactive profile selector. Shows all configured profiles in your `~/.aws/config` and lets you pick one to log in.
 
-#### AWS SSO
-```bash
-ark aws sso --start-url https://your-sso-domain.awsapps.com/start
-```
+#### `ark aws login`
+Logs into AWS using a specific profile.
+- `--profile`: (Required) Name of the profile to use.
+- `--set-default`: (Optional) Set this profile as the `[default]` in your credentials file.
 
-### Kubernetes Operations
+#### `ark aws sso`
+Configures and starts a new AWS SSO session.
+- `--start-url`: (Required) AWS SSO start URL.
+- `--region`: (Optional) AWS SSO region (default: `us-east-1`).
 
-```bash
-ark k8s [command]
-```
+### ☸️ Kubernetes Commands
 
-## Commands
+#### `ark k8s`
+Interactive cluster selector. Lists all clusters in your `kubeconfig` and lets you switch between them. It will automatically check if you need to assume a role for the selected cluster.
 
-### AWS Commands
-- `ark aws login` - Login to AWS with profile
-- `ark aws sso` - Configure AWS SSO
+#### `ark k8s setup`
+Scans AWS accounts for EKS clusters and configures them in your `kubeconfig`.
+- `--role-prefixs`: (Optional) Comma-separated list of role prefixes to search for (default: `readonly,read-only`).
+- `--role-arn`: (Optional) Specific static Role ARN to use. **Mutually exclusive with `--role-prefixs`**.
+- `--regions`: (Optional) List of AWS regions to scan (default: `us-west-2`).
+- `--clean`: (Optional) Clean `kubeconfig` before configuring (default: `true`).
+- `--kubeconfig-path`: (Optional) Path to `kubeconfig` (default: `~/.kube/config`).
+- `--replace-profile`: (Optional) Replace profile in `kubeconfig` with a specific one.
 
-### Kubernetes Commands
-- `ark k8s` - Kubernetes operations
+#### `ark k8s diagnose`
+Diagnoses common issues with your Kubernetes and `kubectl` configuration.
 
-## Configuration
+### ℹ️ General Commands
 
-The tool uses standard AWS and Kubernetes configuration files:
-- AWS: `~/.aws/config` and `~/.aws/credentials`
-- Kubernetes: `~/.kube/config`
+#### `ark version`
+Shows the current version of the CLI.
+
+---
 
 ## Development
 
@@ -79,13 +89,14 @@ go build -o ark main.go
 
 ### Running Tests
 ```bash
-go test ./...
+# Run all tests
+make test
+
+# Run tests with coverage report
+make coverage
 ```
 
-### Linting
-```bash
-golangci-lint run
-```
+---
 
 ## Contributing
 
@@ -104,7 +115,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Issues](https://github.com/andresgarcia29/ark-cli/issues)
 - [Discussions](https://github.com/andresgarcia29/ark-cli/discussions)
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for a list of changes and version history.

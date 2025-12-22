@@ -195,7 +195,7 @@ type RateLimiter struct {
 	mutex sync.Mutex
 }
 
-// NewRateLimiter crea un nuevo rate limiter con el delay especificado
+// NewRateLimiter creates a new rate limiter with the specified delay
 func NewRateLimiter(delay time.Duration) *RateLimiter {
 	return &RateLimiter{
 		delay: delay,

@@ -24,28 +24,28 @@ func init() {
 }
 
 func aws(cmd *cobra.Command, args []string) {
-	// Crear contexto
+	// Create context
 	ctx := context.Background()
 
-	// Mostrar selector interactivo de perfiles
+	// Show interactive profile selector
 	selectedProfile, err := animation.InteractiveProfileSelector()
 	if err != nil {
 		fmt.Printf("❌ Error selecting profile: %v\n", err)
 		return
 	}
 
-	// Mostrar información del perfil seleccionado
+	// Show selected profile information
 	fmt.Printf("\n✅ Selected profile: %s (%s)\n", selectedProfile.ProfileName, selectedProfile.ProfileType)
 	fmt.Println("🔐 Logging in...")
 
-	// Resolver configuración SSO (puede venir del source profile para assume role)
+	// Resolve SSO configuration (can come from source profile for assume role)
 	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(selectedProfile.ProfileName)
 	if err != nil {
 		fmt.Printf("Error resolving SSO configuration: %v\n", err)
 		return
 	}
 
-	// Realizar login con el perfil seleccionado usando retry
+	// Perform login with the selected profile using retry
 	if err := controllers.AttemptLoginWithRetry(ctx, selectedProfile.ProfileName, true, ssoRegion, ssoStartURL); err != nil {
 		fmt.Printf("❌ Login failed after retry: %v\n", err)
 		return

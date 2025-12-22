@@ -40,19 +40,19 @@ func (e *EKSClient) ListClusters(ctx context.Context) ([]string, error) {
 
 // GetClustersForAccountRegion gets all clusters for a specific account and region
 func GetClustersForAccountRegion(ctx context.Context, profile, accountID, region string) ([]EKSCluster, error) {
-	// Crear cliente EKS
+	// Create EKS client
 	eksClient, err := NewEKSClient(ctx, region, profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create EKS client: %w", err)
 	}
 
-	// Listar clusters
+	// List clusters
 	clusterNames, err := eksClient.ListClusters(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Crear objetos EKSCluster
+	// Create EKSCluster objects
 	var clusters []EKSCluster
 	for _, name := range clusterNames {
 		clusters = append(clusters, EKSCluster{
@@ -109,7 +109,7 @@ func GetClustersForAccountMultiRegion(ctx context.Context, profile, accountID st
 
 // GetClustersFromAllAccounts gets clusters from all accounts in the specified regions
 // OPTIMIZED VERSION: Parallelizes the processing of multiple AWS accounts
-func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefixs []string) ([]EKSCluster, error) {
+func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefixs []string, roleARN string) ([]EKSCluster, error) {
 	logger := logs.GetLogger()
 
 	// If no regions are specified, use default
@@ -124,8 +124,15 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefi
 		return nil, fmt.Errorf("failed to read profiles: %w", err)
 	}
 
-	// Step 2: Select one profile per account (prioritizing ReadOnly)
-	selectedProfiles := SelectProfilesPerAccount(allProfiles, rolePrefixs)
+	// Step 2: Select profiles based on prefix or specific ARN
+	var selectedProfiles map[string]ProfileConfig
+	if roleARN != "" {
+		logger.Infow("Searching for profile with specific Role ARN", "role_arn", roleARN)
+		selectedProfiles = SelectProfileByARN(allProfiles, roleARN)
+	} else {
+		selectedProfiles = SelectProfilesPerAccount(allProfiles, rolePrefixs)
+	}
+
 	logger.Infow("Accounts found to scan",
 		"total_accounts", len(selectedProfiles))
 

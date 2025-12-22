@@ -10,7 +10,7 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// WriteConfigFile escribe los perfiles al archivo ~/.aws/config
+// WriteConfigFile writes profiles to the ~/.aws/config file
 func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
 	logger := logs.GetLogger()
 	logger.Infow("Writing config file", "profiles_count", len(profiles), "start_url", s.StartURL, "region", s.Region)
@@ -25,14 +25,14 @@ func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
 	configPath := filepath.Join(configDir, "config")
 	logger.Debugw("Config file path", "path", configPath)
 
-	// Crear directorio si no existe
+	// Create directory if it doesn't exist
 	logger.Debugw("Ensuring .aws directory exists", "path", configDir)
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		logger.Errorw("Failed to create .aws directory", "path", configDir, "error", err)
 		return fmt.Errorf("failed to create .aws directory: %w", err)
 	}
 
-	// Generar contenido del archivo
+	// Generate file content
 	var content strings.Builder
 	logger.Debug("Generating config file content")
 
@@ -46,12 +46,12 @@ func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
 		content.WriteString(fmt.Sprintf("sso_account_id = %s\n", profile.AccountID))
 		content.WriteString(fmt.Sprintf("sso_role_name = %s\n", profile.RoleName))
 		content.WriteString(fmt.Sprintf("region = %s\n", s.Region))
-		content.WriteString("\n") // Línea en blanco entre perfiles
+		content.WriteString("\n") // Blank line between profiles
 	}
 
 	logger.Debugw("Generated config file content", "total_profiles", len(profiles))
 
-	// Escribir archivo
+	// Write file
 	logger.Debugw("Writing config file", "path", configPath)
 	if err := os.WriteFile(configPath, []byte(content.String()), 0600); err != nil {
 		logger.Errorw("Failed to write config file", "path", configPath, "error", err)
@@ -62,14 +62,14 @@ func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
 	return nil
 }
 
-// generateProfileName genera un nombre de perfil sanitizado
+// generateProfileName generates a sanitized profile name
 func generateProfileName(accountName, roleName string) string {
-	// Convertir a minúsculas y reemplazar espacios/caracteres especiales con guiones
+	// Convert to lowercase and replace spaces/special characters with hyphens
 	name := strings.ToLower(accountName + "-" + roleName)
 	name = strings.ReplaceAll(name, " ", "-")
 	name = strings.ReplaceAll(name, "_", "-")
 
-	// Remover caracteres no válidos (mantener solo letras, números y guiones)
+	// Remove invalid characters (keep only letters, numbers, and hyphens)
 	var result strings.Builder
 	for _, char := range name {
 		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
@@ -80,7 +80,7 @@ func generateProfileName(accountName, roleName string) string {
 	return result.String()
 }
 
-// parseProfileFromConfigData parsea un perfil específico desde los datos de un archivo de configuración
+// parseProfileFromConfigData parses a specific profile from configuration file data
 func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig, error) {
 	lines := strings.Split(string(data), "\n")
 	var currentProfile string
@@ -94,7 +94,7 @@ func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Detectar inicio de perfil
+		// Detect profile start
 		if strings.HasPrefix(line, "[profile ") {
 			currentProfile = line
 			if currentProfile == targetProfile {
@@ -102,7 +102,7 @@ func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig
 			}
 		}
 
-		// Si estamos en el perfil correcto, leer sus propiedades
+		// If we are in the correct profile, read its properties
 		if found && currentProfile == targetProfile && strings.Contains(line, "=") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
@@ -130,7 +130,7 @@ func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig
 			}
 		}
 
-		// Si encontramos otro perfil después del nuestro, terminar
+		// If we find another profile after ours, terminate
 		if found && currentProfile != targetProfile && strings.HasPrefix(line, "[profile ") {
 			break
 		}
@@ -140,7 +140,7 @@ func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig
 		return nil, nil
 	}
 
-	// Determinar el tipo de perfil basado en las propiedades encontradas
+	// Determine profile type based on found properties
 	if profileConfig.RoleARN != "" {
 		profileConfig.ProfileType = ProfileTypeAssumeRole
 	} else if profileConfig.StartURL != "" {
@@ -152,7 +152,7 @@ func parseProfileFromConfigData(data []byte, profileName string) (*ProfileConfig
 	return profileConfig, nil
 }
 
-// ReadProfileFromConfig lee un perfil específico del archivo ~/.aws/config y ~/.aws/custom_config
+// ReadProfileFromConfig reads a specific profile from ~/.aws/config and ~/.aws/custom_config files
 func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Reading profile from config", "profile", profileName)
@@ -163,7 +163,7 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Primero intentar leer de custom_config si existe (tiene prioridad)
+	// First try to read from custom_config if it exists (has priority)
 	customConfigPath := filepath.Join(homeDir, ".aws", "custom_config")
 	if data, err := os.ReadFile(customConfigPath); err == nil {
 		logger.Debugw("Reading from custom_config", "path", customConfigPath)
@@ -175,7 +175,7 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 		logger.Warnw("Error reading custom_config (will continue with main config)", "path", customConfigPath, "error", err)
 	}
 
-	// Si no se encontró en custom_config, leer de config principal
+	// If not found in custom_config, read from main config
 	configPath := filepath.Join(homeDir, ".aws", "config")
 	logger.Debugw("Reading from main config", "path", configPath)
 
@@ -200,15 +200,15 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 	return profileConfig, nil
 }
 
-// ResolveSSOConfiguration resuelve la configuración SSO para un perfil
-// Si es un perfil assume role, obtiene la configuración del source profile
+// ResolveSSOConfiguration resolves the SSO configuration for a profile
+// If it's an assume role profile, it gets the configuration from the source profile
 func ResolveSSOConfiguration(profileName string) (ssoRegion, ssoStartURL string, err error) {
 	profileConfig, err := ReadProfileFromConfig(profileName)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read profile config: %w", err)
 	}
 
-	// Si es un perfil SSO directo, devolver su configuración
+	// If it's a direct SSO profile, return its configuration
 	if profileConfig.ProfileType == ProfileTypeSSO {
 		if profileConfig.SSORegion == "" || profileConfig.StartURL == "" {
 			return "", "", fmt.Errorf("profile %s has incomplete SSO configuration (region: %s, start_url: %s)",
@@ -217,7 +217,7 @@ func ResolveSSOConfiguration(profileName string) (ssoRegion, ssoStartURL string,
 		return profileConfig.SSORegion, profileConfig.StartURL, nil
 	}
 
-	// Si es un perfil assume role, obtener la configuración del source profile
+	// If it's an assume role profile, get the configuration from the source profile
 	if profileConfig.ProfileType == ProfileTypeAssumeRole {
 		if profileConfig.SourceProfile == "" {
 			return "", "", fmt.Errorf("assume role profile %s is missing source_profile", profileName)
@@ -242,7 +242,7 @@ func ResolveSSOConfiguration(profileName string) (ssoRegion, ssoStartURL string,
 	return "", "", fmt.Errorf("profile %s does not have SSO configuration (type: %s)", profileName, profileConfig.ProfileType)
 }
 
-// parseAllProfilesFromConfigData parsea todos los perfiles desde los datos de un archivo de configuración
+// parseAllProfilesFromConfigData parses all profiles from configuration file data
 func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 	var profiles []ProfileConfig
 	lines := strings.Split(string(data), "\n")
@@ -251,11 +251,11 @@ func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Detectar inicio de perfil
+		// Detect profile start
 		if strings.HasPrefix(line, "[profile ") && strings.HasSuffix(line, "]") {
-			// Guardar el perfil anterior si existe y es válido
+			// Save the previous profile if it exists and is valid
 			if currentProfile != nil && (currentProfile.AccountID != "" || currentProfile.RoleARN != "") {
-				// Determinar el tipo de perfil
+				// Determine profile type
 				if currentProfile.RoleARN != "" {
 					currentProfile.ProfileType = ProfileTypeAssumeRole
 				} else if currentProfile.StartURL != "" {
@@ -264,14 +264,14 @@ func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 				profiles = append(profiles, *currentProfile)
 			}
 
-			// Extraer nombre del perfil
+			// Extract profile name
 			profileName := strings.TrimSuffix(strings.TrimPrefix(line, "[profile "), "]")
 			currentProfile = &ProfileConfig{
 				ProfileName: profileName,
 			}
 		}
 
-		// Leer propiedades del perfil actual
+		// Read current profile properties
 		if currentProfile != nil && strings.Contains(line, "=") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
@@ -300,9 +300,9 @@ func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 		}
 	}
 
-	// Agregar el último perfil si es válido
+	// Add the last profile if it is valid
 	if currentProfile != nil && (currentProfile.AccountID != "" || currentProfile.RoleARN != "") {
-		// Determinar el tipo de perfil
+		// Determine profile type
 		if currentProfile.RoleARN != "" {
 			currentProfile.ProfileType = ProfileTypeAssumeRole
 		} else if currentProfile.StartURL != "" {
@@ -314,8 +314,8 @@ func parseAllProfilesFromConfigData(data []byte) ([]ProfileConfig, error) {
 	return profiles, nil
 }
 
-// ReadAllProfilesFromConfig lee todos los perfiles del archivo ~/.aws/config y ~/.aws/custom_config
-// Los perfiles de custom_config tienen prioridad sobre los de config principal
+// ReadAllProfilesFromConfig reads all profiles from ~/.aws/config and ~/.aws/custom_config files
+// Profiles from custom_config have priority over main config
 func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 	logger := logs.GetLogger()
 	homeDir, err := os.UserHomeDir()
@@ -323,7 +323,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Leer perfiles del archivo config principal
+	// Read profiles from main config file
 	configPath := filepath.Join(homeDir, ".aws", "config")
 	profilesMap := make(map[string]ProfileConfig)
 
@@ -336,7 +336,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		if err != nil {
 			logger.Warnw("Failed to parse main config (will try custom_config)", "error", err)
 		} else {
-			// Agregar perfiles del config principal al mapa
+			// Add profiles from main config to map
 			for _, profile := range profiles {
 				profilesMap[profile.ProfileName] = profile
 			}
@@ -344,7 +344,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		}
 	}
 
-	// Leer perfiles del archivo custom_config si existe (tiene prioridad)
+	// Read profiles from custom_config file if it exists (has priority)
 	customConfigPath := filepath.Join(homeDir, ".aws", "custom_config")
 	if data, err := os.ReadFile(customConfigPath); err == nil {
 		logger.Debugw("Reading profiles from custom_config", "path", customConfigPath)
@@ -352,7 +352,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		if err != nil {
 			logger.Warnw("Failed to parse custom_config", "error", err)
 		} else {
-			// Los perfiles de custom_config sobrescriben o agregan a los del config principal
+			// Profiles from custom_config overwrite or add to main config profiles
 			for _, profile := range customProfiles {
 				profilesMap[profile.ProfileName] = profile
 			}
@@ -362,7 +362,7 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 		logger.Warnw("Error reading custom_config (will continue with main config only)", "path", customConfigPath, "error", err)
 	}
 
-	// Convertir el mapa a slice
+	// Convert map to slice
 	var profiles []ProfileConfig
 	for _, profile := range profilesMap {
 		profiles = append(profiles, profile)
@@ -372,23 +372,23 @@ func ReadAllProfilesFromConfig() ([]ProfileConfig, error) {
 	return profiles, nil
 }
 
-// SelectProfilesPerAccount selecciona un perfil por cuenta, priorizando ReadOnlyAccess
+// SelectProfilesPerAccount selects one profile per account, prioritizing ReadOnlyAccess
 func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[string]ProfileConfig {
 	accountProfiles := make(map[string][]ProfileConfig)
 
-	// Agrupar perfiles por cuenta
+	// Group profiles by account
 	for _, profile := range profiles {
 		accountProfiles[profile.AccountID] = append(accountProfiles[profile.AccountID], profile)
 	}
 
-	// Seleccionar el mejor perfil por cuenta
+	// Select the best profile per account
 	selectedProfiles := make(map[string]ProfileConfig)
 
 	for accountID, accountProfileList := range accountProfiles {
 		var selected ProfileConfig
 		foundReadOnly := false
 
-		// Buscar ReadOnlyAccess primero
+		// Search for ReadOnlyAccess first
 		for _, profile := range accountProfileList {
 			roleName := strings.ToLower(profile.RoleName)
 			found := slices.ContainsFunc(prefixs, func(p string) bool {
@@ -402,12 +402,27 @@ func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[st
 			}
 		}
 
-		// Si no se encontró ReadOnly, usar el primero
+		// If ReadOnly wasn't found, use the first one
 		if !foundReadOnly && len(accountProfileList) > 0 {
 			selected = accountProfileList[0]
 		}
 
 		selectedProfiles[accountID] = selected
+	}
+
+	return selectedProfiles
+}
+
+// SelectProfileByARN selects a profile matching the provided role ARN
+func SelectProfileByARN(profiles []ProfileConfig, roleARN string) map[string]ProfileConfig {
+	selectedProfiles := make(map[string]ProfileConfig)
+
+	for _, profile := range profiles {
+		if profile.RoleARN == roleARN {
+			selectedProfiles[profile.AccountID] = profile
+			// We only need one profile for this ARN/account
+			break
+		}
 	}
 
 	return selectedProfiles

@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ProfileDisplayInfo contiene información para mostrar en la lista interactiva
+// ProfileDisplayInfo contains information to show in the interactive list
 type ProfileDisplayInfo struct {
 	Name        string
 	Type        string
@@ -19,38 +19,38 @@ type ProfileDisplayInfo struct {
 	Region      string
 }
 
-// profileSelectorModel representa el modelo para el selector de perfiles con Bubble Tea
+// profileSelectorModel represents the model for the profile selector with Bubble Tea
 type profileSelectorModel struct {
 	profiles         []services_aws.ProfileConfig
 	filteredProfiles []services_aws.ProfileConfig
 	cursor           int
-	offset           int // Índice del primer perfil visible
-	visibleLines     int // Número máximo de perfiles a mostrar
+	offset           int // Index of the first visible profile
+	visibleLines     int // Maximum number of profiles to show
 	searchQuery      string
 	selected         *services_aws.ProfileConfig
 	quitting         bool
 	searchMode       bool
 }
 
-// initialProfileSelectorModel crea el modelo inicial para el selector
+// initialProfileSelectorModel creates the initial model for the selector
 func initialProfileSelectorModel(profiles []services_aws.ProfileConfig) profileSelectorModel {
 	return profileSelectorModel{
 		profiles:         profiles,
 		filteredProfiles: profiles,
 		cursor:           0,
 		offset:           0,
-		visibleLines:     10, // Mostrar máximo 10 perfiles
+		visibleLines:     10, // Show maximum 10 profiles
 		searchQuery:      "",
-		searchMode:       true, // Iniciar en modo búsqueda
+		searchMode:       true, // Start in search mode
 	}
 }
 
-// Init implementa el método Init de tea.Model
+// Init implements the tea.Model Init method
 func (m profileSelectorModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update implementa el método Update de tea.Model
+// Update implements the tea.Model Update method
 func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -60,14 +60,14 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "/":
-			// Activar modo búsqueda
+			// Activate search mode
 			m.searchMode = true
 			m.searchQuery = ""
 			return m, nil
 
 		case "esc":
 			if m.searchMode {
-				// Salir del modo búsqueda
+				// Exit search mode
 				m.searchMode = false
 				m.searchQuery = ""
 				m.filteredProfiles = m.profiles
@@ -79,7 +79,7 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			// Alternar entre modo búsqueda y vista completa
+			// Toggle between search mode and full view
 			if m.searchMode {
 				m.searchMode = false
 				m.searchQuery = ""
@@ -96,11 +96,11 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if m.searchMode && len(m.filteredProfiles) > 0 {
-				// Si hay resultados, seleccionar el primero
+				// If there are results, select the first one
 				m.selected = &m.filteredProfiles[m.cursor]
 				return m, tea.Quit
 			} else if !m.searchMode && len(m.filteredProfiles) > 0 {
-				// Seleccionar perfil
+				// Select profile
 				m.selected = &m.filteredProfiles[m.cursor]
 				return m, tea.Quit
 			}
@@ -116,7 +116,7 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				// Ajustar offset para mantener el cursor visible
+				// Adjust offset to keep the cursor visible
 				if m.cursor < m.offset {
 					m.offset = m.cursor
 				}
@@ -125,7 +125,7 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.filteredProfiles)-1 {
 				m.cursor++
-				// Ajustar offset para mantener el cursor visible
+				// Adjust offset to keep the cursor visible
 				currentVisibleLines := m.getCurrentVisibleLines()
 				if m.cursor >= m.offset+currentVisibleLines {
 					m.offset = m.cursor - currentVisibleLines + 1
@@ -133,7 +133,7 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		default:
-			// Si estamos en modo búsqueda, agregar caracteres
+			// If in search mode, add characters
 			if m.searchMode && len(msg.String()) == 1 {
 				m.searchQuery += msg.String()
 				m.filterProfiles()
@@ -144,7 +144,7 @@ func (m profileSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// min retorna el mínimo de dos enteros
+// min returns the minimum of two integers
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -152,13 +152,13 @@ func min(a, b int) int {
 	return b
 }
 
-// getCurrentVisibleLines calcula cuántas líneas mostrar actualmente
+// getCurrentVisibleLines calculates how many lines to show currently
 func (m profileSelectorModel) getCurrentVisibleLines() int {
-	// Siempre limitar a máximo 10 resultados
+	// Always limit to maximum 10 results
 	return min(m.visibleLines, len(m.filteredProfiles))
 }
 
-// filterProfiles filtra los perfiles basado en la consulta de búsqueda
+// filterProfiles filters profiles based on the search query
 func (m *profileSelectorModel) filterProfiles() {
 	if m.searchQuery == "" {
 		m.filteredProfiles = m.profiles
@@ -169,31 +169,31 @@ func (m *profileSelectorModel) filterProfiles() {
 	query := strings.ToLower(m.searchQuery)
 
 	for _, profile := range m.profiles {
-		// Buscar en nombre del perfil
+		// Search by profile name
 		if strings.Contains(strings.ToLower(profile.ProfileName), query) {
 			filtered = append(filtered, profile)
 			continue
 		}
 
-		// Buscar en account ID
+		// Search by account ID
 		if strings.Contains(strings.ToLower(profile.AccountID), query) {
 			filtered = append(filtered, profile)
 			continue
 		}
 
-		// Buscar en role name
+		// Search by role name
 		if strings.Contains(strings.ToLower(profile.RoleName), query) {
 			filtered = append(filtered, profile)
 			continue
 		}
 
-		// Buscar en role ARN
+		// Search by role ARN
 		if strings.Contains(strings.ToLower(profile.RoleARN), query) {
 			filtered = append(filtered, profile)
 			continue
 		}
 
-		// Buscar en source profile
+		// Search by source profile
 		if strings.Contains(strings.ToLower(profile.SourceProfile), query) {
 			filtered = append(filtered, profile)
 			continue
@@ -201,12 +201,12 @@ func (m *profileSelectorModel) filterProfiles() {
 	}
 
 	m.filteredProfiles = filtered
-	// Resetear cursor y offset cuando cambian los perfiles filtrados
+	// Reset cursor and offset when filtered profiles change
 	m.cursor = 0
 	m.offset = 0
 }
 
-// View implementa el método View de tea.Model
+// View implements the tea.Model View method
 func (m profileSelectorModel) View() string {
 	if m.quitting {
 		return ""
@@ -260,7 +260,7 @@ func (m profileSelectorModel) View() string {
 		s.WriteString(countStyle.Render(fmt.Sprintf("Found %d of %d profiles", len(m.filteredProfiles), len(m.profiles))))
 		s.WriteString("\n\n")
 	} else if len(m.filteredProfiles) > m.visibleLines {
-		// Mostrar indicador de scroll cuando hay más perfiles
+		// Show scroll indicator when there are more profiles
 		countStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			Italic(true)
@@ -278,12 +278,12 @@ func (m profileSelectorModel) View() string {
 		return s.String()
 	}
 
-	// Calcular ventana de visualización
+	// Calculate display window
 	currentVisibleLines := m.getCurrentVisibleLines()
 	startDisplay := m.offset
 	endDisplay := min(m.offset+currentVisibleLines, len(m.filteredProfiles))
 
-	// Mostrar indicador si hay perfiles arriba
+	// Show indicator if there are profiles above
 	if m.offset > 0 {
 		ellipsisStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -292,7 +292,7 @@ func (m profileSelectorModel) View() string {
 		s.WriteString("\n")
 	}
 
-	// Renderizar perfiles en la ventana visible
+	// Render profiles in the visible window
 	for i := startDisplay; i < endDisplay; i++ {
 		profile := m.filteredProfiles[i]
 		cursor := " "
@@ -335,7 +335,7 @@ func (m profileSelectorModel) View() string {
 		s.WriteString("\n")
 	}
 
-	// Mostrar indicador si hay perfiles abajo
+	// Show indicator if there are profiles below
 	if endDisplay < len(m.filteredProfiles) {
 		ellipsisStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -347,7 +347,7 @@ func (m profileSelectorModel) View() string {
 	return s.String()
 }
 
-// formatProfileDisplay formatea la información del perfil para mostrar
+// formatProfileDisplay formats the profile information for display
 func formatProfileDisplay(profile services_aws.ProfileConfig) ProfileDisplayInfo {
 	var description string
 	var accountID, roleName string
@@ -358,14 +358,14 @@ func formatProfileDisplay(profile services_aws.ProfileConfig) ProfileDisplayInfo
 		roleName = profile.RoleName
 		description = fmt.Sprintf("SSO - Account: %s, Role: %s", accountID, roleName)
 	case services_aws.ProfileTypeAssumeRole:
-		// Extraer account ID del ARN
+		// Extract account ID from ARN
 		if strings.Contains(profile.RoleARN, ":") {
 			parts := strings.Split(profile.RoleARN, ":")
 			if len(parts) >= 5 {
 				accountID = parts[4]
 			}
 		}
-		// Extraer role name del ARN
+		// Extract role name from ARN
 		if strings.Contains(profile.RoleARN, "/") {
 			parts := strings.Split(profile.RoleARN, "/")
 			if len(parts) >= 2 {
@@ -387,9 +387,9 @@ func formatProfileDisplay(profile services_aws.ProfileConfig) ProfileDisplayInfo
 	}
 }
 
-// InteractiveProfileSelector permite seleccionar un perfil de forma interactiva usando Bubble Tea
+// InteractiveProfileSelector allows selecting a profile interactively using Bubble Tea
 func InteractiveProfileSelector() (*services_aws.ProfileConfig, error) {
-	// Obtener todos los perfiles
+	// Get all profiles
 	profiles, err := services_aws.ReadAllProfilesFromConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read profiles: %w", err)
@@ -399,7 +399,7 @@ func InteractiveProfileSelector() (*services_aws.ProfileConfig, error) {
 		return nil, fmt.Errorf("no profiles found in AWS config")
 	}
 
-	// Crear y ejecutar el programa Bubble Tea
+	// Create and run the Bubble Tea program
 	model := initialProfileSelectorModel(profiles)
 	program := tea.NewProgram(model)
 
@@ -408,7 +408,7 @@ func InteractiveProfileSelector() (*services_aws.ProfileConfig, error) {
 		return nil, fmt.Errorf("error running profile selector: %w", err)
 	}
 
-	// Verificar si se seleccionó un perfil
+	// Check if a profile was selected
 	if finalModel.(profileSelectorModel).selected == nil {
 		return nil, fmt.Errorf("no profile selected")
 	}

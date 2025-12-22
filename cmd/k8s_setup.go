@@ -27,11 +27,12 @@ func init() {
 	kubernetesSetupCmd.Flags().String("kubeconfig-path", "~/.kube/config", "Path to kubeconfig")
 	kubernetesSetupCmd.Flags().StringSlice("role-prefixs", []string{"readonly", "read-only"}, "Role prefixs to scan")
 	kubernetesSetupCmd.Flags().String("replace-profile", "", "Replace profile in kubeconfig")
+	kubernetesSetupCmd.Flags().String("role-arn", "", "Specific Role ARN to use for authentication (mutually exclusive with role-prefixs)")
 }
 
-// ConfigureAllEKSClusters es el flujo completo para configurar todos los clusters EKS
-func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, rolePrefixs []string, replaceProfile string) error {
-	// Paso 1: Limpiar kubeconfig si se requiere
+// ConfigureAllEKSClusters is the complete flow to configure all EKS clusters
+func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, rolePrefixs []string, replaceProfile string, roleARN string) error {
+	// Step 1: Clean kubeconfig if required
 	if cleanKubeconfig {
 		fmt.Println("🧹 Cleaning kubeconfig...")
 		if err := services_kubernetes.CleanKubeconfig(kubeconfigPath); err != nil {
@@ -40,11 +41,11 @@ func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubecon
 		fmt.Println()
 	}
 
-	// Paso 2: Obtener todos los clusters de todas las cuentas con spinner
+	// Step 2: Get all clusters from all accounts with a spinner
 	var clusters []services_aws.EKSCluster
 	err := animation.ShowSpinner("Fetching EKS clusters from all accounts", func() error {
 		var err error
-		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions, rolePrefixs)
+		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions, rolePrefixs, roleARN)
 		return err
 	})
 
@@ -59,7 +60,7 @@ func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubecon
 
 	fmt.Printf("\n✓ Total clusters found: %d\n", len(clusters))
 
-	// Mostrar resumen de clusters por cuenta
+	// Show clusters summary per account
 	accountClusters := make(map[string]int)
 	for _, cluster := range clusters {
 		accountClusters[cluster.AccountID]++
@@ -71,7 +72,7 @@ func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubecon
 
 	fmt.Println()
 
-	// Paso 3: Configurar kubeconfig para todos los clusters con progress bar
+	// Step 3: Configure kubeconfig for all clusters with progress bar
 	if err := controllers_k8s.UpdateKubeconfigWithProgress(clusters, replaceProfile); err != nil {
 		return fmt.Errorf("failed to update kubeconfig: %w", err)
 	}
@@ -85,15 +86,26 @@ func kubernetesSetup(cmd *cobra.Command, args []string) {
 	kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path")
 	replaceProfile, _ := cmd.Flags().GetString("replace-profile")
 	rolePrefixs, _ := cmd.Flags().GetStringSlice("role-prefixs")
+	roleARN, _ := cmd.Flags().GetString("role-arn")
 
 	ctx := context.Background()
 
-	if rolePrefixs == nil {
-		fmt.Println("No role prefixs provided, using default prefixs: readonly, read-only")
+	// Validate flags exclusivity
+	if cmd.Flags().Changed("role-prefixs") && cmd.Flags().Changed("role-arn") {
+		fmt.Println("Error: --role-prefixs and --role-arn are mutually exclusive")
+		return
+	}
+
+	// If role-arn is provided, we don't use prefixes
+	if roleARN != "" {
+		rolePrefixs = nil
+	} else if !cmd.Flags().Changed("role-prefixs") {
+		// Only use defaults if the flag hasn't changed and there is no ARN
+		fmt.Println("No role prefixs or ARN provided, using default prefixs: readonly, read-only")
 		rolePrefixs = []string{"readonly", "read-only"}
 	}
 
-	if err := ConfigureAllEKSClusters(ctx, regions, cleanConfig, kubeconfigPath, rolePrefixs, replaceProfile); err != nil {
+	if err := ConfigureAllEKSClusters(ctx, regions, cleanConfig, kubeconfigPath, rolePrefixs, replaceProfile, roleARN); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}

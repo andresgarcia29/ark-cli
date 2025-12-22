@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ProgressModel representa el modelo para la barra de progreso
+// ProgressModel represents the progress bar model
 type ProgressModel struct {
 	progress     progress.Model
 	total        int
@@ -22,13 +22,13 @@ type ProgressModel struct {
 	successCount int
 }
 
-// progressMsg es un mensaje para actualizar el progreso
+// progressMsg is a message to update the progress
 type progressMsg struct {
 	item  string
 	error string
 }
 
-// NewProgressModel crea un nuevo modelo de barra de progreso
+// NewProgressModel creates a new progress bar model
 func NewProgressModel(total int) ProgressModel {
 	prog := progress.New(
 		progress.WithDefaultGradient(),
@@ -45,12 +45,12 @@ func NewProgressModel(total int) ProgressModel {
 	}
 }
 
-// Init implementa tea.Model
+// Init implements tea.Model
 func (m ProgressModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update implementa tea.Model
+// Update implements tea.Model
 func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -89,7 +89,7 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// View implementa tea.Model
+// View implements tea.Model
 func (m ProgressModel) View() string {
 	if m.quitting && !m.done {
 		return ""
@@ -97,7 +97,7 @@ func (m ProgressModel) View() string {
 
 	var s strings.Builder
 
-	// Título
+	// Title
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("205")).
 		Bold(true).
@@ -111,18 +111,18 @@ func (m ProgressModel) View() string {
 		s.WriteString("\n\n")
 	}
 
-	// Barra de progreso
+	// Progress bar
 	percent := float64(m.current) / float64(m.total)
 	s.WriteString(m.progress.ViewAs(percent))
 	s.WriteString("\n\n")
 
-	// Contador
+	// Counter
 	counterStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240"))
 	s.WriteString(counterStyle.Render(fmt.Sprintf("Progress: %d/%d clusters", m.current, m.total)))
 	s.WriteString("\n\n")
 
-	// Item actual
+	// Current item
 	if !m.done && m.currentItem != "" {
 		currentStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("86")).
@@ -131,7 +131,7 @@ func (m ProgressModel) View() string {
 		s.WriteString("\n\n")
 	}
 
-	// Resumen final
+	// Final summary
 	if m.done {
 		successStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("86")).
@@ -147,7 +147,7 @@ func (m ProgressModel) View() string {
 			s.WriteString(failStyle.Render(fmt.Sprintf("✗ Failed: %d", len(m.errors))))
 			s.WriteString("\n\n")
 
-			// Mostrar errores
+			// Show errors
 			errorHeaderStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("196")).
 				Bold(true)
@@ -168,7 +168,7 @@ func (m ProgressModel) View() string {
 	return s.String()
 }
 
-// ProgressIncrement retorna un comando para incrementar el progreso
+// ProgressIncrement returns a command to increment the progress
 func ProgressIncrement(item string, err error) tea.Cmd {
 	return func() tea.Msg {
 		errorMsg := ""
@@ -182,15 +182,15 @@ func ProgressIncrement(item string, err error) tea.Cmd {
 	}
 }
 
-// ShowProgressBar muestra una barra de progreso para múltiples operaciones
+// ShowProgressBar shows a progress bar for multiple operations
 func ShowProgressBar(total int, fn func(update func(item string, err error)) error) error {
 	model := NewProgressModel(total)
 	p := tea.NewProgram(model)
 
-	// Canal para errores
+	// Channel for errors
 	errChan := make(chan error, 1)
 
-	// Función para actualizar el progreso
+	// Function to update the progress
 	updateProgress := func(item string, err error) {
 		p.Send(progressMsg{
 			item: item,
@@ -203,17 +203,17 @@ func ShowProgressBar(total int, fn func(update func(item string, err error)) err
 		})
 	}
 
-	// Ejecutar la función en una goroutine
+	// Execute the function in a goroutine
 	go func() {
 		err := fn(updateProgress)
 		errChan <- err
 	}()
 
-	// Ejecutar el programa (esto bloqueará hasta que termine)
+	// Run the program (this will block until it finishes)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("error running progress bar: %w", err)
 	}
 
-	// Obtener el resultado de la función
+	// Get the function result
 	return <-errChan
 }

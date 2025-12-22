@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// SpinnerModel representa el modelo para el spinner
+// SpinnerModel represents the spinner model
 type SpinnerModel struct {
 	spinner  spinner.Model
 	message  string
@@ -17,7 +17,7 @@ type SpinnerModel struct {
 	done     bool
 }
 
-// NewSpinnerModel crea un nuevo modelo de spinner
+// NewSpinnerModel creates a new spinner model
 func NewSpinnerModel(message string) SpinnerModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -28,12 +28,12 @@ func NewSpinnerModel(message string) SpinnerModel {
 	}
 }
 
-// Init implementa tea.Model
+// Init implements tea.Model
 func (m SpinnerModel) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-// Update implementa tea.Model
+// Update implements tea.Model
 func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -62,7 +62,7 @@ func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// View implementa tea.Model
+// View implements tea.Model
 func (m SpinnerModel) View() string {
 	if m.done {
 		checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
@@ -77,35 +77,35 @@ func (m SpinnerModel) View() string {
 	return fmt.Sprintf("%s %s\n", m.spinner.View(), messageStyle.Render(m.message))
 }
 
-// doneMsg es un mensaje para indicar que el spinner debe terminar
+// doneMsg is a message to indicate that the spinner should terminate
 type doneMsg struct{}
 
-// Done retorna un comando que envía un mensaje de finalización
+// Done returns a command that sends a completion message
 func Done() tea.Msg {
 	return doneMsg{}
 }
 
-// ShowSpinner muestra un spinner mientras ejecuta una función
+// ShowSpinner shows a spinner while executing a function
 func ShowSpinner(message string, fn func() error) error {
 	p := tea.NewProgram(NewSpinnerModel(message))
 
-	// Canal para manejar el resultado de la función
+	// Channel to handle the function result
 	errChan := make(chan error, 1)
 
-	// Ejecutar la función en una goroutine
+	// Execute the function in a goroutine
 	go func() {
 		err := fn()
 		errChan <- err
-		// Enviar mensaje de finalización al programa
-		time.Sleep(100 * time.Millisecond) // Pequeña pausa para que se vea el spinner
+		// Send completion message to the program
+		time.Sleep(100 * time.Millisecond) // Small pause for the spinner to be visible
 		p.Send(Done())
 	}()
 
-	// Ejecutar el programa (esto bloqueará hasta que termine)
+	// Run the program (this will block until it finishes)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("error running spinner: %w", err)
 	}
 
-	// Obtener el resultado de la función
+	// Get the function result
 	return <-errChan
 }

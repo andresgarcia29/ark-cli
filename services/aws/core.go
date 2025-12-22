@@ -31,7 +31,7 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 
 	client := &SSOClient{
 		oidcClient: ssooidc.NewFromConfig(cfg),
-		ssoClient:  sso.NewFromConfig(cfg), // Agregar esta línea
+		ssoClient:  sso.NewFromConfig(cfg), // Add this line
 		Region:     region,
 		StartURL:   startURL,
 	}
@@ -40,14 +40,14 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 	return client, nil
 }
 
-// ClientRegistration contiene la información del cliente registrado
+// ClientRegistration contains registered client information
 type ClientRegistration struct {
 	ClientID     string
 	ClientSecret string
-	ExpiresAt    int64 // Unix timestamp de cuándo expira
+	ExpiresAt    int64 // Unix timestamp of when it expires
 }
 
-// RegisterClient registra la aplicación como cliente con AWS SSO
+// RegisterClient registers the application as a client with AWS SSO
 func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, error) {
 	logger := logs.GetLogger()
 	logger.Debug("Registering client with AWS SSO")
@@ -73,17 +73,17 @@ func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, er
 	return registration, nil
 }
 
-// DeviceAuthorization contiene la información de autorización del dispositivo
+// DeviceAuthorization contains device authorization information
 type DeviceAuthorization struct {
 	DeviceCode              string
 	UserCode                string
 	VerificationURI         string
 	VerificationURIComplete string
 	ExpiresIn               int32
-	Interval                int32 // Segundos entre cada polling
+	Interval                int32 // Seconds between each polling
 }
 
-// TokenResponse contiene el access token y metadata
+// TokenResponse contains access token and metadata
 type TokenResponse struct {
 	AccessToken  string
 	ExpiresIn    int32
@@ -98,20 +98,20 @@ type CachedToken struct {
 	ExpiresAt   string `json:"expiresAt"` // ISO8601 format
 }
 
-// Account representa una cuenta de AWS
+// Account represents an AWS account
 type Account struct {
 	AccountID    string
 	AccountName  string
 	EmailAddress string
 }
 
-// Role representa un rol en una cuenta
+// Role represents a role in an account
 type Role struct {
 	RoleName  string
 	AccountID string
 }
 
-// AWSProfile representa una combinación de cuenta y rol
+// AWSProfile represents a combination of account and role
 type AWSProfile struct {
 	AccountID    string
 	AccountName  string
@@ -119,7 +119,7 @@ type AWSProfile struct {
 	EmailAddress string
 }
 
-// ProfileType representa el tipo de perfil
+// ProfileType represents the profile type
 type ProfileType string
 
 const (
@@ -127,7 +127,7 @@ const (
 	ProfileTypeAssumeRole ProfileType = "assume_role"
 )
 
-// ProfileConfig representa la configuración de un perfil de AWS
+// ProfileConfig represents the configuration of an AWS profile
 type ProfileConfig struct {
 	ProfileName string
 	ProfileType ProfileType
@@ -136,13 +136,13 @@ type ProfileConfig struct {
 	AccountID   string
 	RoleName    string
 	SSORegion   string
-	// Campos para assume role
+	// Assume role fields
 	RoleARN       string
 	SourceProfile string
 	ExternalID    string
 }
 
-// Credentials representa las credenciales temporales de AWS
+// Credentials represents temporary AWS credentials
 type Credentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
@@ -150,7 +150,7 @@ type Credentials struct {
 	Expiration      int64 // Unix timestamp
 }
 
-// EKSCluster representa un cluster de EKS
+// EKSCluster represents an EKS cluster
 type EKSCluster struct {
 	Name      string
 	Region    string
@@ -158,13 +158,13 @@ type EKSCluster struct {
 	Profile   string
 }
 
-// EKSClient encapsula el cliente de EKS
+// EKSClient encapsulates the EKS client
 type EKSClient struct {
 	client *eks.Client
 	region string
 }
 
-// NewEKSClient crea una nueva instancia de EKSClient
+// NewEKSClient creates a new instance of EKSClient
 func NewEKSClient(ctx context.Context, region, profile string) (*EKSClient, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Creating new EKS client", "region", region, "profile", profile)

@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sso"
 )
 
-// ListAccountRoles lista todos los roles disponibles para una cuenta específica
+// ListAccountRoles lists all available roles for a specific account
 func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID string) ([]Role, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Starting to list account roles", "account_id", accountID)
@@ -25,7 +25,7 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 		input := &sso.ListAccountRolesInput{
 			AccessToken: aws.String(accessToken),
 			AccountId:   aws.String(accountID),
-			MaxResults:  aws.Int32(100), // Máximo permitido por página
+			MaxResults:  aws.Int32(100), // Maximum allowed per page
 			NextToken:   nextToken,
 		}
 
@@ -37,7 +37,7 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 
 		logger.Debugw("Roles page retrieved", "account_id", accountID, "page", pageCount, "roles_in_page", len(output.RoleList))
 
-		// Agregar roles de esta página
+		// Add roles from this page
 		for _, role := range output.RoleList {
 			roleObj := Role{
 				RoleName:  aws.ToString(role.RoleName),
@@ -47,7 +47,7 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 			logger.Debugw("Role added", "account_id", accountID, "role_name", roleObj.RoleName)
 		}
 
-		// Si no hay más páginas, terminar
+		// If there are no more pages, terminate
 		if output.NextToken == nil {
 			logger.Debugw("No more pages to fetch", "account_id", accountID)
 			break
@@ -59,7 +59,7 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 	return roles, nil
 }
 
-// GetRoleCredentials obtiene credenciales temporales para un rol específico
+// GetRoleCredentials obtains temporary credentials for a specific role
 func (s *SSOClient) GetRoleCredentials(ctx context.Context, accessToken, accountID, roleName string) (*Credentials, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Getting role credentials", "account_id", accountID, "role_name", roleName)

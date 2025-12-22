@@ -19,7 +19,7 @@ func StartSSOSession(ctx context.Context, region, startURL string) error {
 	return nil
 }
 
-// StartDeviceAuthorization inicia el flujo de autorización del dispositivo
+// StartDeviceAuthorization starts the device authorization flow
 func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clientSecret string) (*DeviceAuthorization, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Starting device authorization", "client_id", clientID, "start_url", s.StartURL)
@@ -49,7 +49,7 @@ func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clie
 	return auth, nil
 }
 
-// CreateToken hace polling hasta que el usuario autorice o expire el tiempo
+// CreateToken polls until the user authorizes or the time expires
 func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, deviceCode string, interval int32) (*TokenResponse, error) {
 	logger := logs.GetLogger()
 	logger.Debugw("Starting token creation polling", "client_id", clientID, "interval", interval)
@@ -76,24 +76,24 @@ func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, dev
 
 			output, err := s.oidcClient.CreateToken(ctx, input)
 			if err != nil {
-				// Si es AuthorizationPendingException, continuar polling
+				// If it is AuthorizationPendingException, continue polling
 				if isAuthorizationPending(err) {
 					logger.Debugw("Authorization still pending", "attempt", pollCount)
 					continue
 				}
-				// Si es SlowDownException, aumentar el intervalo
+				// If it is SlowDownException, increase the interval
 				if isSlowDown(err) {
 					newInterval := interval + 5
 					logger.Debugw("Rate limited, increasing interval", "old_interval", interval, "new_interval", newInterval)
 					ticker.Reset(time.Duration(newInterval) * time.Second)
 					continue
 				}
-				// Cualquier otro error, fallar
+				// Any other error, fail
 				logger.Errorw("Failed to create token", "attempt", pollCount, "error", err)
 				return nil, fmt.Errorf("failed to create token: %w", err)
 			}
 
-			// Token obtenido exitosamente
+			// Token obtained successfully
 			token := &TokenResponse{
 				AccessToken:  aws.ToString(output.AccessToken),
 				ExpiresIn:    output.ExpiresIn,
@@ -107,7 +107,7 @@ func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, dev
 	}
 }
 
-// Helper functions para identificar errores específicos
+// Helper functions to identify specific errors
 func isAuthorizationPending(err error) bool {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {

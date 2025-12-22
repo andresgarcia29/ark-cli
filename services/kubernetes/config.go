@@ -8,7 +8,7 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// CleanKubeconfig limpia el archivo ~/.kube/config
+// CleanKubeconfig cleans the ~/.kube/config file
 func CleanKubeconfig(kubeconfigPath string) error {
 	logger := logs.GetLogger()
 	logger.Infow("Starting kubeconfig cleanup", "path", kubeconfigPath)
@@ -24,9 +24,9 @@ func CleanKubeconfig(kubeconfigPath string) error {
 		logger.Debugw("Using default kubeconfig path", "path", kubeconfigPath)
 	}
 
-	// Verificar si el archivo existe
+	// Check if the file exists
 	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
-		// El archivo no existe, no hay nada que limpiar
+		// File does not exist, nothing to clean
 		logger.Infow("Kubeconfig file does not exist, nothing to clean", "path", kubeconfigPath)
 		fmt.Println("~/.kube/config does not exist, nothing to clean")
 		return nil
@@ -34,7 +34,7 @@ func CleanKubeconfig(kubeconfigPath string) error {
 
 	logger.Debugw("Kubeconfig file exists, proceeding with cleanup", "path", kubeconfigPath)
 
-	// Crear backup del archivo antes de eliminarlo (opcional pero recomendado)
+	// Create a backup of the file before deleting it (optional but recommended)
 	backupPath := kubeconfigPath + ".backup"
 	logger.Debugw("Creating backup of kubeconfig", "original", kubeconfigPath, "backup", backupPath)
 
@@ -46,7 +46,7 @@ func CleanKubeconfig(kubeconfigPath string) error {
 	logger.Infow("Backup created successfully", "backup", backupPath)
 	fmt.Printf("Backup created at: %s\n", backupPath)
 
-	// Crear directorio ~/.kube si no existe
+	// Create ~/.kube directory if it doesn't exist
 	kubeDir := filepath.Join(homeDir, ".kube")
 	logger.Debugw("Ensuring .kube directory exists", "path", kubeDir)
 
@@ -57,7 +57,7 @@ func CleanKubeconfig(kubeconfigPath string) error {
 
 	logger.Debugw(".kube directory ensured", "path", kubeDir)
 
-	// Crear archivo vacío
+	// Create empty file
 	logger.Debugw("Creating empty kubeconfig file", "path", kubeconfigPath)
 
 	if err := os.WriteFile(kubeconfigPath, []byte(""), 0600); err != nil {

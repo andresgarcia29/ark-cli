@@ -180,9 +180,9 @@ func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool
 	return nil
 }
 
-// AssumeRoleWithProfile asume un rol usando las credenciales del perfil fuente
+// AssumeRoleWithProfile assumes a role using source profile credentials
 func AssumeRoleWithProfile(ctx context.Context, profileConfig *ProfileConfig) (*Credentials, error) {
-	// Crear configuración para el perfil fuente
+	// Create source profile configuration
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithSharedConfigProfile(profileConfig.SourceProfile),
 		config.WithRegion(profileConfig.Region),
@@ -191,27 +191,27 @@ func AssumeRoleWithProfile(ctx context.Context, profileConfig *ProfileConfig) (*
 		return nil, fmt.Errorf("failed to load source profile config: %w", err)
 	}
 
-	// Crear cliente STS
+	// Create STS client
 	stsClient := sts.NewFromConfig(cfg)
 
-	// Preparar input para assume role
+	// Prepare assume role input
 	input := &sts.AssumeRoleInput{
 		RoleArn:         aws.String(profileConfig.RoleARN),
 		RoleSessionName: aws.String(fmt.Sprintf("ark-cli-%d", time.Now().Unix())),
 	}
 
-	// Agregar ExternalID si está presente
+	// Add ExternalID if present
 	if profileConfig.ExternalID != "" {
 		input.ExternalId = aws.String(profileConfig.ExternalID)
 	}
 
-	// Asumir el rol
+	// Assume the role
 	result, err := stsClient.AssumeRole(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume role: %w", err)
 	}
 
-	// Convertir a nuestro formato de credenciales
+	// Convert to our credentials format
 	creds := &Credentials{
 		AccessKeyID:     aws.ToString(result.Credentials.AccessKeyId),
 		SecretAccessKey: aws.ToString(result.Credentials.SecretAccessKey),

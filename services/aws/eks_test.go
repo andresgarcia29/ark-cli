@@ -141,43 +141,33 @@ func TestGetClustersForAccount(t *testing.T) {
 func TestGetClustersFromAllAccounts(t *testing.T) {
 	tests := []struct {
 		name             string
-		accounts         []string
 		regions          []string
+		rolePrefixs      []string
+		roleARN          string
 		expectedError    bool
 		expectedErrorMsg string
 	}{
 		{
-			name:             "valid accounts and regions",
-			accounts:         []string{"123456789012", "987654321098"},
+			name:             "valid prefixs and regions",
 			regions:          []string{"us-west-2", "us-east-1"},
+			rolePrefixs:      []string{"readonly", "read-only"},
+			roleARN:          "",
 			expectedError:    false,
 			expectedErrorMsg: "",
 		},
 		{
-			name:             "empty accounts list",
-			accounts:         []string{},
-			regions:          []string{"us-west-2", "us-east-1"},
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name:             "nil accounts list",
-			accounts:         nil,
-			regions:          []string{"us-west-2", "us-east-1"},
+			name:             "valid role ARN",
+			regions:          []string{"us-west-2"},
+			rolePrefixs:      nil,
+			roleARN:          "arn:aws:iam::123456789012:role/MyRole",
 			expectedError:    false,
 			expectedErrorMsg: "",
 		},
 		{
 			name:             "empty regions list",
-			accounts:         []string{"123456789012", "987654321098"},
 			regions:          []string{},
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name:             "single account and region",
-			accounts:         []string{"123456789012"},
-			regions:          []string{"us-west-2"},
+			rolePrefixs:      []string{"readonly"},
+			roleARN:          "",
 			expectedError:    false,
 			expectedErrorMsg: "",
 		},
@@ -189,11 +179,10 @@ func TestGetClustersFromAllAccounts(t *testing.T) {
 
 			// Test parameter validation
 			assert.NotNil(t, ctx)
-			assert.IsType(t, []string{}, tt.accounts)
 			assert.IsType(t, []string{}, tt.regions)
 
 			// Test that the function would accept these parameters
-			_ = func(ctx context.Context, accounts, regions []string) ([]EKSCluster, error) {
+			_ = func(ctx context.Context, regions []string, rolePrefixs []string, roleARN string) ([]EKSCluster, error) {
 				return []EKSCluster{}, nil
 			}
 		})
@@ -434,29 +423,30 @@ func TestGetClustersFromAllAccountsErrorHandling(t *testing.T) {
 	// Test error handling scenarios
 	tests := []struct {
 		name        string
-		accounts    []string
 		regions     []string
+		rolePrefixs []string
+		roleARN     string
 		errorType   string
 		expectedMsg string
 	}{
 		{
 			name:        "API error",
-			accounts:    []string{"123456789012", "987654321098"},
 			regions:     []string{"us-west-2", "us-east-1"},
+			rolePrefixs: []string{"readonly"},
 			errorType:   "api_error",
 			expectedMsg: "failed to get clusters from all accounts",
 		},
 		{
 			name:        "partial failure",
-			accounts:    []string{"123456789012", "987654321098"},
 			regions:     []string{"us-west-2", "us-east-1"},
+			rolePrefixs: []string{"readonly"},
 			errorType:   "partial_error",
 			expectedMsg: "some accounts failed",
 		},
 		{
 			name:        "network error",
-			accounts:    []string{"123456789012", "987654321098"},
 			regions:     []string{"us-west-2", "us-east-1"},
+			rolePrefixs: []string{"readonly"},
 			errorType:   "network_error",
 			expectedMsg: "network error occurred",
 		},
@@ -618,35 +608,36 @@ func TestGetClustersFromAllAccountsSuccess(t *testing.T) {
 	// Test successful cluster retrieval from all accounts
 	tests := []struct {
 		name          string
-		accounts      []string
 		regions       []string
+		rolePrefixs   []string
+		roleARN       string
 		expectedCount int
 		expectedFirst string
 		expectedLast  string
 	}{
 		{
 			name:          "single account and region",
-			accounts:      []string{"123456789012"},
 			regions:       []string{"us-west-2"},
+			rolePrefixs:   []string{"readonly"},
 			expectedCount: 1,
 			expectedFirst: "test-cluster",
 			expectedLast:  "test-cluster",
 		},
 		{
 			name:          "multiple accounts and regions",
-			accounts:      []string{"123456789012", "987654321098"},
 			regions:       []string{"us-west-2", "us-east-1"},
+			rolePrefixs:   []string{"readonly"},
 			expectedCount: 4,
 			expectedFirst: "cluster1",
 			expectedLast:  "cluster4",
 		},
 		{
-			name:          "no accounts",
-			accounts:      []string{},
-			regions:       []string{"us-west-2", "us-east-1"},
-			expectedCount: 0,
-			expectedFirst: "",
-			expectedLast:  "",
+			name:          "using role ARN",
+			regions:       []string{"us-west-2"},
+			roleARN:       "arn:aws:iam::123456789012:role/MyRole",
+			expectedCount: 1,
+			expectedFirst: "arn-cluster",
+			expectedLast:  "arn-cluster",
 		},
 	}
 
@@ -667,7 +658,7 @@ func TestGetClustersFromAllAccountsSuccess(t *testing.T) {
 					clusters[i] = EKSCluster{
 						Name:      clusterName,
 						Region:    tt.regions[0],
-						AccountID: tt.accounts[0],
+						AccountID: "123456789012",
 						Profile:   "test-profile",
 					}
 				}

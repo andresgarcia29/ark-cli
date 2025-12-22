@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/andresgarcia29/ark-cli/lib"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 )
 
 func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boostraping bool) error {
-	// Paso 1: Crear el cliente SSO
+	// Step 1: Create SSO client
 	client, err := services_aws.NewSSOClient(ctx, SSORegion, SSOStartURL)
 	if err != nil {
 		fmt.Println("Error creating SSO client:", err)
@@ -17,7 +18,7 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 	}
 	fmt.Printf("SSO client created successfully for region: %s, start URL: %s\n", client.Region, client.StartURL)
 
-	// Paso 2: Registrar el cliente
+	// Step 2: Register client
 	fmt.Println("\nRegistering client...")
 	registration, err := client.RegisterClient(ctx)
 	if err != nil {
@@ -26,7 +27,7 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 	}
 	fmt.Println("Client registered successfully")
 
-	// Paso 3: Iniciar autorización del dispositivo
+	// Step 3: Start device authorization
 	fmt.Println("\nStarting device authorization...")
 	deviceAuth, err := client.StartDeviceAuthorization(ctx, registration.ClientID, registration.ClientSecret)
 	if err != nil {
@@ -34,15 +35,23 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 		return err
 	}
 
-	// Paso 4: Mostrar instrucciones al usuario
+	// Step 4: Show instructions to the user
 	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("Please authorize this application:")
 	fmt.Printf("Visit: %s\n", deviceAuth.VerificationURIComplete)
 	fmt.Printf("Or go to: %s and enter code: %s\n", deviceAuth.VerificationURI, deviceAuth.UserCode)
 	fmt.Println(strings.Repeat("=", 60))
+
+	// Open browser automatically
+	fmt.Println("\nOpening browser for authorization...")
+	if err := lib.OpenBrowser(deviceAuth.VerificationURIComplete); err != nil {
+		fmt.Printf("Warning: Failed to open browser automatically: %v\n", err)
+		fmt.Println("Please open the URL manually.")
+	}
+
 	fmt.Println("\nWaiting for authorization...")
 
-	// Paso 5: Polling para obtener el token
+	// Step 5: Polling to get the token
 	token, err := client.CreateToken(ctx, registration.ClientID, registration.ClientSecret, deviceAuth.DeviceCode, deviceAuth.Interval)
 	if err != nil {
 		fmt.Println("Error creating token:", err)
@@ -50,7 +59,7 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 	}
 	fmt.Println("\n✓ Authorization successful!")
 
-	// Paso 6: Guardar token en cache
+	// Step 6: Save token to cache
 	fmt.Println("Saving token to cache...")
 	if err := client.SaveTokenToCache(token); err != nil {
 		fmt.Println("Error saving token:", err)
@@ -59,7 +68,7 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 	fmt.Println("✓ Token saved successfully")
 
 	if boostraping {
-		// Paso 7: Obtener todas las cuentas y roles
+		// Step 7: Get all accounts and roles
 		fmt.Println("\nFetching accounts and roles...")
 		profiles, err := client.GetAllProfiles(ctx, token.AccessToken)
 		if err != nil {
@@ -68,7 +77,7 @@ func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boos
 		}
 		fmt.Printf("✓ Found %d profiles\n", len(profiles))
 
-		// Paso 8: Escribir el archivo config
+		// Step 8: Write config file
 		fmt.Println("\nWriting profiles to ~/.aws/config...")
 		if err := client.WriteConfigFile(profiles); err != nil {
 			fmt.Println("Error writing config file:", err)

@@ -45,7 +45,7 @@ func awsLoginCommand(cmd *cobra.Command, args []string) {
 
 	ctx := context.Background()
 
-	// Resolver configuración SSO (puede venir del source profile para assume role)
+	// Resolve SSO configuration (can come from source profile for assume role)
 	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(profileName)
 	if err != nil {
 		fmt.Printf("Error resolving SSO configuration: %v\n", err)
@@ -54,7 +54,7 @@ func awsLoginCommand(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("✅ Resolved SSO configuration - Region: %s, Start URL: %s\n", ssoRegion, ssoStartURL)
 
-	// Usar función de retry para el login
+	// Use retry function for login
 	if err := controllers.AttemptLoginWithRetry(ctx, profileName, setAsDefault, ssoRegion, ssoStartURL); err != nil {
 		fmt.Printf("❌ Login failed after retry: %v\n", err)
 		return

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// SaveTokenToCache guarda el access token en ~/.aws/sso/cache/
+// SaveTokenToCache saves the access token in ~/.aws/sso/cache/
 func (s *SSOClient) SaveTokenToCache(token *TokenResponse) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -19,16 +19,16 @@ func (s *SSOClient) SaveTokenToCache(token *TokenResponse) error {
 
 	cacheDir := filepath.Join(homeDir, ".aws", "sso", "cache")
 
-	// Crear directorio si no existe
+	// Create directory if it doesn't exist
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Generar nombre del archivo (hash SHA1 del start URL)
+	// Generate file name (SHA1 hash of the start URL)
 	fileName := generateCacheFileName(s.StartURL)
 	filePath := filepath.Join(cacheDir, fileName)
 
-	// Calcular tiempo de expiración
+	// Calculate expiration time
 	expiresAt := time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 
 	cachedToken := CachedToken{
@@ -38,13 +38,13 @@ func (s *SSOClient) SaveTokenToCache(token *TokenResponse) error {
 		ExpiresAt:   expiresAt.Format(time.RFC3339),
 	}
 
-	// Serializar a JSON
+	// Serialize to JSON
 	data, err := json.MarshalIndent(cachedToken, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal token: %w", err)
 	}
 
-	// Guardar archivo con permisos restrictivos
+	// Save file with restrictive permissions
 	if err := os.WriteFile(filePath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
@@ -52,13 +52,13 @@ func (s *SSOClient) SaveTokenToCache(token *TokenResponse) error {
 	return nil
 }
 
-// generateCacheFileName genera el nombre del archivo basado en el hash del start URL
+// generateCacheFileName generates the file name based on the start URL hash
 func generateCacheFileName(startURL string) string {
 	hash := sha1.Sum([]byte(startURL))
 	return hex.EncodeToString(hash[:]) + ".json"
 }
 
-// ReadTokenFromCache lee el access token del cache
+// ReadTokenFromCache reads the access token from the cache
 func ReadTokenFromCache(startURL string) (*CachedToken, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -79,7 +79,7 @@ func ReadTokenFromCache(startURL string) (*CachedToken, error) {
 		return nil, fmt.Errorf("failed to unmarshal cache file: %w", err)
 	}
 
-	// Verificar si el token ha expirado
+	// Verify if the token has expired
 	expiresAt, err := time.Parse(time.RFC3339, cachedToken.ExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse expiration time: %w", err)
