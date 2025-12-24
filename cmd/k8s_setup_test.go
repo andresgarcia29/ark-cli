@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -34,7 +33,7 @@ func TestKubernetesSetupCommandFlags(t *testing.T) {
 						assert.Equal(t, "Error: --role-prefixs and --role-arn are mutually exclusive", tt.expectedOutput)
 						return
 					}
-					
+
 					if roleARN != "" {
 						assert.Nil(t, rolePrefixs)
 					}
@@ -58,4 +57,3 @@ func TestKubernetesSetupCommandFlags(t *testing.T) {
 		})
 	}
 }
-
