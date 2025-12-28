@@ -23,7 +23,12 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 	logger := logs.GetLogger()
 	logger.Debugw("Creating new SSO client", "region", region, "start_url", startURL)
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	// Use anonymous credentials to avoid loading profile configuration
+	// SSO device authorization flow doesn't require existing credentials
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(aws.AnonymousCredentials{}),
+	)
 	if err != nil {
 		logger.Errorw("Failed to load SDK config", "region", region, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
@@ -31,7 +36,7 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 
 	client := &SSOClient{
 		oidcClient: ssooidc.NewFromConfig(cfg),
-		ssoClient:  sso.NewFromConfig(cfg), // Add this line
+		ssoClient:  sso.NewFromConfig(cfg),
 		Region:     region,
 		StartURL:   startURL,
 	}
