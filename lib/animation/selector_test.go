@@ -1,9 +1,12 @@
 package animation
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func items() []Item {
@@ -14,9 +17,17 @@ func items() []Item {
 	}
 }
 
+// press sends a special key, e.g. tea.KeyEnter.
+func press(p *picker, code rune) (*picker, tea.Cmd) {
+	m, cmd := p.Update(tea.KeyPressMsg{Code: code})
+	return m.(*picker), cmd
+}
+
+// typeRunes types printable text the way a terminal reports it in v2: Key.Text
+// carries the character, which is what keeps letters out of the shortcut table.
 func typeRunes(p *picker, s string) *picker {
 	for _, r := range s {
-		m, _ := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m, _ := p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		p = m.(*picker)
 	}
 	return p
@@ -42,8 +53,7 @@ func TestSearchFiltersAndSelects(t *testing.T) {
 		t.Fatalf("filtered = %d, want 1", len(p.filtered))
 	}
 
-	m, _ := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	got := m.(*picker)
+	got, _ := press(p, tea.KeyEnter)
 	if got.chosen < 0 {
 		t.Fatal("enter did not select anything")
 	}
@@ -57,8 +67,7 @@ func TestSearchFiltersAndSelects(t *testing.T) {
 func TestEscClearsSearchBeforeQuitting(t *testing.T) {
 	p := typeRunes(newPicker("pick", items()), "k8s")
 
-	m, cmd := p.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	p = m.(*picker)
+	p, cmd := press(p, tea.KeyEscape)
 	if p.query != "" {
 		t.Errorf("esc left query %q", p.query)
 	}
@@ -70,14 +79,14 @@ func TestEscClearsSearchBeforeQuitting(t *testing.T) {
 	}
 
 	// A second esc, with no search active, should quit.
-	if _, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEsc}); cmd == nil {
+	if _, cmd = press(p, tea.KeyEscape); cmd == nil {
 		t.Error("esc on an empty search should quit")
 	}
 }
 
 func TestCancellingReportsNoSelection(t *testing.T) {
 	p := newPicker("pick", items())
-	m, cmd := p.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m, cmd := p.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Error("ctrl+c should quit")
 	}
@@ -117,8 +126,7 @@ func TestCursorStaysInRange(t *testing.T) {
 
 func TestBackspaceEditsQuery(t *testing.T) {
 	p := typeRunes(newPicker("pick", items()), "k8sx")
-	m, _ := p.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-	p = m.(*picker)
+	p, _ = press(p, tea.KeyBackspace)
 
 	if p.query != "k8s" {
 		t.Errorf("query = %q, want k8s", p.query)
@@ -126,4 +134,66 @@ func TestBackspaceEditsQuery(t *testing.T) {
 	if len(p.filtered) != 1 {
 		t.Errorf("filtered = %d, want 1", len(p.filtered))
 	}
+}
+
+// highlight slices the original title using offsets found in its lowercased
+// form. Those can disagree for multi-byte text, so it must never cut a rune.
+func TestHighlightHandlesUnicode(t *testing.T) {
+	cases := []struct {
+		title, query string
+	}{
+		{"café-prod-readonly", "prod"},
+		{"CAFÉ-PROD", "café"},
+		{"münchen-cluster", "münchen"},
+		{"ÅNGSTRÖM-eks", "ström"},
+		{"日本-クラスタ", "クラスタ"},
+		{"plain", ""},
+		{"plain", "zzz"},
+	}
+
+	for _, c := range cases {
+		item := Item{Title: c.title}
+		item.prepare()
+
+		got := highlight(item, c.query, lipgloss.NewStyle())
+		if !utf8.ValidString(got) {
+			t.Errorf("highlight(%q, %q) produced invalid UTF-8: %q", c.title, c.query, got)
+		}
+		// Stripping styling must give the original title back untouched.
+		if plain := stripANSI(got); plain != c.title {
+			t.Errorf("highlight(%q, %q) altered the text: %q", c.title, c.query, plain)
+		}
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		switch {
+		case r == '\x1b':
+			inEscape = true
+		case inEscape && r == 'm':
+			inEscape = false
+		case !inEscape:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func TestFilterMatchesBadgeAndDetail(t *testing.T) {
+	list := []Item{
+		{Title: "alpha", Badge: "sso", Detail: "account 111122223333"},
+		{Title: "beta", Badge: "assume_role", Detail: "account 999988887777"},
+	}
+	p := newPicker("pick", list)
+
+	for _, q := range []string{"assume", "9999", "beta"} {
+		np := typeRunes(newPicker("pick", list), q)
+		if len(np.filtered) != 1 {
+			t.Errorf("query %q matched %d rows, want 1", q, len(np.filtered))
+		}
+	}
+	_ = p
 }

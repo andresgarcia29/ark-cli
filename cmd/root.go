@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/andresgarcia29/ark-cli/lib/animation"
 	"github.com/andresgarcia29/ark-cli/lib/ui"
 	"github.com/andresgarcia29/ark-cli/logs"
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +51,15 @@ func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := rootCmd.ExecuteContext(ctx)
+	err := fang.Execute(ctx, rootCmd,
+		fang.WithColorSchemeFunc(helpScheme),
+		fang.WithVersion(Version),
+		fang.WithCommit(Commit),
+		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
+		// ark reports its own failures through ui.Fail, in one voice with the
+		// rest of its output; fang's error box would print them a second time.
+		fang.WithErrorHandler(func(io.Writer, fang.Styles, error) {}),
+	)
 	logs.Sync()
 
 	switch {

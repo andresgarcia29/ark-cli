@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	controllers_k8s "github.com/andresgarcia29/ark-cli/controllers/kubernetes"
 	"github.com/andresgarcia29/ark-cli/lib/animation"
@@ -99,8 +100,23 @@ func runKubernetesSetup(cmd *cobra.Command, args []string) error {
 		ui.Warn("%s", ui.Reason(e))
 	}
 
-	ui.Done("Added %d clusters to your kubeconfig", len(report.Configured))
-	ui.Hint("ark k8s")
+	regions := map[string]int{}
+	for _, c := range clusters {
+		regions[c.Region]++
+	}
+	summary := [][2]string{
+		{"clusters", ui.Strong.Render(fmt.Sprint(len(report.Configured)))},
+		{"regions", fmt.Sprint(len(regions))},
+		{"kubeconfig", setupKubeconfigPath},
+	}
+	if n := services_aws.ThrottleCount(); n > 0 {
+		summary = append(summary, [2]string{"throttled", fmt.Sprint(n)})
+	}
+
+	ui.Blank()
+	ui.Done("Kubeconfig updated")
+	ui.Summary(summary...)
+	ui.Hint("ark k8s  to switch cluster")
 
 	for _, name := range report.Configured {
 		ui.Result("%s", name)

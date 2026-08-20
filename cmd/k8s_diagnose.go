@@ -96,7 +96,7 @@ func runKubernetesDiagnose(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
-	ui.Title("Diagnostics")
+	ui.Heading("Diagnostics")
 	failed := 0
 	for _, c := range checks {
 		detail, err := c.run(ctx)

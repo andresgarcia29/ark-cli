@@ -81,6 +81,14 @@ needed at *connect* time, because kubectl calls `aws eks get-token`.
 #### `ark k8s diagnose`
 Diagnoses common issues with your Kubernetes and `kubectl` configuration.
 
+### Terminal Output
+
+The interface adapts to where it is running: colours follow a palette that
+adjusts to light and dark terminals, and `NO_COLOR`, dumb terminals and
+redirected output automatically degrade to plain ASCII with no escape codes.
+Interactive pickers and spinners are skipped entirely when stderr is not a
+terminal, so CI logs stay readable.
+
 ### Global Flags
 
 - `--debug`, `-d`: Show internal diagnostics on stderr.

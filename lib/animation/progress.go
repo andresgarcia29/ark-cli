@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 	"github.com/andresgarcia29/ark-cli/lib/ui"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Outcome is the result of processing one item in a batch.
@@ -23,6 +23,7 @@ type progressModel struct {
 	done    int
 	current string
 	failed  []Outcome
+	width   int
 }
 
 type stepMsg Outcome
@@ -41,31 +42,36 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
+	case tea.KeyPressMsg:
+		if k := msg.Key(); k.Mod&tea.ModCtrl != 0 && (k.Code == 'c' || k.Code == 'd') {
 			return m, tea.Quit
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
-		m.bar.Width = min(msg.Width-4, 60)
+		m.width = msg.Width
+		m.bar.SetWidth(min(msg.Width-4, 48))
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m progressModel) View() string {
+func (m progressModel) View() tea.View {
 	var b strings.Builder
-	b.WriteString(ui.Accent.Render(m.title) + "\n\n")
-	b.WriteString(m.bar.ViewAs(float64(m.done)/float64(m.total)) + "\n")
+	b.WriteString(ui.Title.Render(m.title))
+	b.WriteString("\n\n")
+	b.WriteString(m.bar.ViewAs(float64(m.done) / float64(m.total)))
+	b.WriteString("  ")
 	b.WriteString(ui.Muted.Render(fmt.Sprintf("%d/%d", m.done, m.total)))
 	if len(m.failed) > 0 {
-		b.WriteString(ui.Bad.Render(fmt.Sprintf("  ·  %d failed", len(m.failed))))
+		b.WriteString(ui.Bad.Render(fmt.Sprintf("  %s %d failed", ui.GlyphDot, len(m.failed))))
 	}
 	b.WriteString("\n")
 	if m.current != "" && m.done < m.total {
-		b.WriteString(ui.Muted.Render("  "+m.current) + "\n")
+		b.WriteString("  ")
+		b.WriteString(ui.Faint.Render(truncate(m.current, m.width-4)))
+		b.WriteString("\n")
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // RunBatch applies work to every item, showing a progress bar, and returns the
@@ -81,9 +87,14 @@ func RunBatch(ctx context.Context, title string, items []string, work func(conte
 		return outcomes
 	}
 
-	bar := progress.New(progress.WithDefaultGradient(), progress.WithWidth(40), progress.WithoutPercentage())
+	bar := progress.New(
+		progress.WithColors(ui.ProgressColors()...),
+		progress.WithWidth(48),
+		progress.WithoutPercentage(),
+	)
+
 	p := tea.NewProgram(
-		progressModel{bar: bar, title: title, total: len(items)},
+		progressModel{bar: bar, title: title, total: len(items), width: ui.Width()},
 		tea.WithOutput(ui.Err),
 	)
 

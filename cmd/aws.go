@@ -10,7 +10,7 @@ import (
 
 var awsCmd = &cobra.Command{
 	Use:   "aws",
-	Short: "AWS access",
+	Short: "Sign in to AWS",
 	Long:  "Pick one of your configured AWS profiles and sign in.",
 	RunE:  runAWS,
 }
