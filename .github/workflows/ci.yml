@@ -40,9 +40,11 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # Pinned: "latest" on the v6 action resolves to a golangci-lint built
+        # with an older Go than go.mod targets, which fails before it lints.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
           args: --timeout=5m
 
   build:
