@@ -31,7 +31,6 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 
 		output, err := s.ssoClient.ListAccountRoles(ctx, input)
 		if err != nil {
-			logger.Errorw("Failed to list account roles", "account_id", accountID, "page", pageCount, "error", err)
 			return nil, fmt.Errorf("failed to list account roles for account %s: %w", accountID, err)
 		}
 
@@ -44,7 +43,6 @@ func (s *SSOClient) ListAccountRoles(ctx context.Context, accessToken, accountID
 				AccountID: accountID,
 			}
 			roles = append(roles, roleObj)
-			logger.Debugw("Role added", "account_id", accountID, "role_name", roleObj.RoleName)
 		}
 
 		// If there are no more pages, terminate
@@ -72,7 +70,6 @@ func (s *SSOClient) GetRoleCredentials(ctx context.Context, accessToken, account
 
 	output, err := s.ssoClient.GetRoleCredentials(ctx, input)
 	if err != nil {
-		logger.Errorw("Failed to get role credentials", "account_id", accountID, "role_name", roleName, "error", err)
 		return nil, fmt.Errorf("failed to get role credentials: %w", err)
 	}
 

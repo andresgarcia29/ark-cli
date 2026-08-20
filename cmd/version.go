@@ -1,29 +1,27 @@
 package cmd
 
 import (
-	"fmt"
 	"runtime"
 
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	"github.com/spf13/cobra"
 )
 
-// Version information - these will be set during build time
+// Build metadata, injected via -ldflags at release time.
 var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
-	GoVersion = runtime.Version()
 )
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the version information",
-	Long:  `Print the version information including version, commit hash, build date, and Go version.`,
+	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("ark-cli version %s\n", Version)
-		fmt.Printf("  commit: %s\n", Commit)
-		fmt.Printf("  build date: %s\n", BuildDate)
-		fmt.Printf("  go version: %s\n", GoVersion)
+		ui.Result("ark %s", Version)
+		ui.Result("commit  %s", Commit)
+		ui.Result("built   %s", BuildDate)
+		ui.Result("go      %s", runtime.Version())
 	},
 }
 

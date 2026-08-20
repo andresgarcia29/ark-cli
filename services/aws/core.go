@@ -28,9 +28,9 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(region),
 		config.WithCredentialsProvider(aws.AnonymousCredentials{}),
+		config.WithRetryer(newRetryer),
 	)
 	if err != nil {
-		logger.Errorw("Failed to load SDK config", "region", region, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 
@@ -58,13 +58,12 @@ func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, er
 	logger.Debug("Registering client with AWS SSO")
 
 	input := &ssooidc.RegisterClientInput{
-		ClientName: aws.String("x-cli"),
+		ClientName: aws.String("ark-cli"),
 		ClientType: aws.String("public"),
 	}
 
 	output, err := s.oidcClient.RegisterClient(ctx, input)
 	if err != nil {
-		logger.Errorw("Failed to register client", "error", err)
 		return nil, fmt.Errorf("failed to register client: %w", err)
 	}
 
@@ -161,6 +160,18 @@ type EKSCluster struct {
 	Region    string
 	AccountID string
 	Profile   string
+
+	// ARN, Endpoint and CertificateAuthority come from DescribeCluster and are
+	// everything needed to write a kubeconfig entry without shelling out.
+	ARN                  string
+	Endpoint             string
+	CertificateAuthority string
+}
+
+// Complete reports whether the cluster carries the details needed to write a
+// kubeconfig entry.
+func (c EKSCluster) Complete() bool {
+	return c.ARN != "" && c.Endpoint != "" && c.CertificateAuthority != ""
 }
 
 // EKSClient encapsulates the EKS client
@@ -177,9 +188,9 @@ func NewEKSClient(ctx context.Context, region, profile string) (*EKSClient, erro
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(region),
 		config.WithSharedConfigProfile(profile),
+		config.WithRetryer(newRetryer),
 	)
 	if err != nil {
-		logger.Errorw("Failed to load SDK config for EKS client", "region", region, "profile", profile, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 

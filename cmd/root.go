@@ -1,66 +1,78 @@
 package cmd
 
 import (
-	"fmt"
+	"context"
+	"errors"
+	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/andresgarcia29/ark-cli/lib/animation"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	"github.com/andresgarcia29/ark-cli/logs"
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 )
 
 var (
-	LogLevel bool
+	debug bool
+	quiet bool
 
 	rootCmd = &cobra.Command{
 		Use:   "ark",
-		Short: "A powerful CLI tool for various operations",
-		Long: `ark is a modern CLI application built with Cobra and Go.
-It provides a clean and efficient way to interact with various services and perform common tasks.
+		Short: "AWS SSO and EKS access from one command",
+		Long: `ark signs you into AWS through SSO and keeps your kubeconfig in sync
+with the EKS clusters you can reach.
 
-Example usage:
-  ark aws          # AWS related operations
-  ark kubernetes   # Kubernetes, aliases: k8s, eks
-  ark version      # Show version information
-  ark --help       # Show help information`,
+  ark aws            Pick a profile and sign in
+  ark aws sso        Start a new SSO session and import every profile
+  ark k8s            Switch between clusters
+  ark k8s setup      Import EKS clusters into your kubeconfig`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			initializeLogger()
+			ui.SetQuiet(quiet)
+			logs.Init(debug)
 		},
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().BoolVarP(&LogLevel, "debug", "d", false, "Set the log level to debug")
+	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Show internal diagnostics on stderr")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Only print results and failures")
 }
 
+// Execute runs the CLI and exits non-zero when a command fails, so ark can be
+// chained with && in scripts.
 func Execute() {
-	// First, execute the command to parse flags
-	err := rootCmd.Execute()
-	if err != nil {
+	// Ctrl+C cancels in-flight AWS calls instead of leaving the terminal in
+	// whatever state a TUI was using.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := fang.Execute(ctx, rootCmd,
+		fang.WithColorSchemeFunc(helpScheme),
+		fang.WithVersion(Version),
+		fang.WithCommit(Commit),
+		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
+		// ark reports its own failures through ui.Fail, in one voice with the
+		// rest of its output; fang's error box would print them a second time.
+		fang.WithErrorHandler(func(io.Writer, fang.Styles, error) {}),
+	)
+	logs.Sync()
+
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, animation.ErrCancelled), errors.Is(err, context.Canceled):
+		// The user backed out on purpose; that is not a failure to report.
+		os.Exit(130)
+	case errors.Is(err, errQuiet):
+		// The command already explained itself.
 		os.Exit(1)
-	}
-}
-
-// initializeLogger initializes the logger with the current LogLevel setting
-func initializeLogger() {
-	logLevelName := "error"
-	if LogLevel {
-		fmt.Printf("Setting log level to debug\n")
-		logLevelName = "debug"
-	}
-
-	if err := logs.InitLogger(logs.LogConfig{
-		Level:      logLevelName,
-		Format:     "console",
-		OutputPath: "stdout",
-	}); err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Verify logger is working
-	logger := logs.GetLogger()
-	if logger == nil {
-		fmt.Printf("Failed to get logger instance\n")
+	default:
+		ui.Fail("%s", ui.Reason(err))
 		os.Exit(1)
 	}
 }

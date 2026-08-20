@@ -40,9 +40,11 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # Pinned: "latest" on the v6 action resolves to a golangci-lint built
+        # with an older Go than go.mod targets, which fails before it lints.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
           args: --timeout=5m
 
   build:
@@ -58,5 +60,7 @@ jobs:
       - name: Build snapshot
         uses: ./.github/actions/goreleaser-build
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          # A snapshot publishes nothing, so it needs no personal token; the
+          # built-in job token is enough and cannot expire.
+          github-token: ${{ github.token }}
           snapshot: 'true'

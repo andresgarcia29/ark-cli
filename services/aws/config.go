@@ -10,55 +10,46 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// WriteConfigFile writes profiles to the ~/.aws/config file
+// WriteConfigFile merges the discovered SSO profiles into ~/.aws/config.
+// Profiles the user wrote by hand, including assume-role profiles that ark
+// itself resolves through source_profile, are preserved. The write is atomic.
 func (s *SSOClient) WriteConfigFile(profiles []AWSProfile) error {
-	logger := logs.GetLogger()
-	logger.Infow("Writing config file", "profiles_count", len(profiles), "start_url", s.StartURL, "region", s.Region)
-
-	homeDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		logger.Errorw("Failed to get home directory", "error", err)
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
+	configPath := filepath.Join(home, ".aws", "config")
 
-	configDir := filepath.Join(homeDir, ".aws")
-	configPath := filepath.Join(configDir, "config")
-	logger.Debugw("Config file path", "path", configPath)
+	fileLock.Lock()
+	defer fileLock.Unlock()
 
-	// Create directory if it doesn't exist
-	logger.Debugw("Ensuring .aws directory exists", "path", configDir)
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		logger.Errorw("Failed to create .aws directory", "path", configDir, "error", err)
-		return fmt.Errorf("failed to create .aws directory: %w", err)
+	file, err := readINI(configPath)
+	if err != nil {
+		return err
 	}
 
-	// Generate file content
-	var content strings.Builder
-	logger.Debug("Generating config file content")
-
+	added := 0
 	for _, profile := range profiles {
-		profileName := generateProfileName(profile.AccountName, profile.RoleName)
-		logger.Debugw("Writing profile", "profile_name", profileName, "account_id", profile.AccountID, "role_name", profile.RoleName)
-
-		content.WriteString(fmt.Sprintf("[profile %s]\n", profileName))
-		content.WriteString(fmt.Sprintf("sso_start_url = %s\n", s.StartURL))
-		content.WriteString(fmt.Sprintf("sso_region = %s\n", s.Region))
-		content.WriteString(fmt.Sprintf("sso_account_id = %s\n", profile.AccountID))
-		content.WriteString(fmt.Sprintf("sso_role_name = %s\n", profile.RoleName))
-		content.WriteString(fmt.Sprintf("region = %s\n", s.Region))
-		content.WriteString("\n") // Blank line between profiles
+		name := "profile " + generateProfileName(profile.AccountName, profile.RoleName)
+		if !file.has(name) {
+			added++
+		}
+		section := file.section(name)
+		section.set("sso_start_url", s.StartURL)
+		section.set("sso_region", s.Region)
+		section.set("sso_account_id", profile.AccountID)
+		section.set("sso_role_name", profile.RoleName)
+		if section.Value["region"] == "" {
+			section.set("region", s.Region)
+		}
 	}
 
-	logger.Debugw("Generated config file content", "total_profiles", len(profiles))
-
-	// Write file
-	logger.Debugw("Writing config file", "path", configPath)
-	if err := os.WriteFile(configPath, []byte(content.String()), 0600); err != nil {
-		logger.Errorw("Failed to write config file", "path", configPath, "error", err)
-		return fmt.Errorf("failed to write config file: %w", err)
+	file.sortSections()
+	if err := writeFileAtomic(configPath, file.render(), 0600); err != nil {
+		return err
 	}
 
-	logger.Infow("Config file written successfully", "path", configPath, "profiles_count", len(profiles))
+	logs.GetLogger().Debugw("config merged", "path", configPath, "written", len(profiles), "new", added)
 	return nil
 }
 
@@ -159,7 +150,6 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.Errorw("Failed to get home directory", "error", err)
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
@@ -181,19 +171,17 @@ func ReadProfileFromConfig(profileName string) (*ProfileConfig, error) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		logger.Errorw("Failed to read config file", "path", configPath, "error", err)
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	profileConfig, err := parseProfileFromConfigData(data, profileName)
 	if err != nil {
-		logger.Errorw("Failed to parse profile", "profile", profileName, "error", err)
 		return nil, err
 	}
 
 	if profileConfig == nil {
 		logger.Warnw("Profile not found in config", "profile", profileName)
-		return nil, fmt.Errorf("profile %s not found in config", profileName)
+		return nil, fmt.Errorf("no profile named %q in ~/.aws/config", profileName)
 	}
 
 	logger.Debugw("Profile configuration loaded successfully", "profile", profileName, "type", profileConfig.ProfileType)
@@ -395,7 +383,6 @@ func SelectProfilesPerAccount(profiles []ProfileConfig, prefixs []string) map[st
 				return strings.Contains(roleName, p)
 			})
 			if found {
-				fmt.Println("profile found", profile)
 				selected = profile
 				foundReadOnly = true
 				break

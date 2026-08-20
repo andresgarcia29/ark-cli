@@ -4,28 +4,33 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 )
 
-// AttemptLoginWithRetry handles login with automatic retry
-func AttemptLoginWithRetry(ctx context.Context, profileName string, setAsDefault bool, ssoRegion string, ssoStartURL string) error {
-	// First login attempt
-	if err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); err != nil {
-		fmt.Printf("❌ Login failed: %v\n", err)
-		fmt.Println("🔄 Attempting SSO login...")
-
-		// Perform SSO login
-		if ssoErr := AWSSSOLogin(ctx, ssoRegion, ssoStartURL, false); ssoErr != nil {
-			return fmt.Errorf("SSO login failed: %v", ssoErr)
-		}
-
-		fmt.Println("🔄 Retrying login with updated credentials...")
-
-		// Second login attempt after SSO
-		if retryErr := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); retryErr != nil {
-			return fmt.Errorf("login failed after SSO: %v", retryErr)
-		}
+// Login signs in with profileName, refreshing the SSO session through the
+// browser if the cached token has lapsed.
+func Login(ctx context.Context, profileName string, setAsDefault bool) error {
+	err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault)
+	if err == nil {
+		return nil
+	}
+	if !services_aws.SSOSessionExpired(err) {
+		return err
 	}
 
+	ui.Step("SSO session expired, signing in again")
+
+	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(profileName)
+	if err != nil {
+		return fmt.Errorf("could not resolve the SSO settings for %s: %w", profileName, err)
+	}
+	if err := SSOLogin(ctx, ssoRegion, ssoStartURL, false); err != nil {
+		return err
+	}
+
+	if err := services_aws.LoginWithProfile(ctx, profileName, setAsDefault); err != nil {
+		return fmt.Errorf("login still failed after signing in: %w", err)
+	}
 	return nil
 }

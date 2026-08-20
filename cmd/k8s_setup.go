@@ -6,107 +6,120 @@ import (
 
 	controllers_k8s "github.com/andresgarcia29/ark-cli/controllers/kubernetes"
 	"github.com/andresgarcia29/ark-cli/lib/animation"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 	services_kubernetes "github.com/andresgarcia29/ark-cli/services/kubernetes"
 	"github.com/spf13/cobra"
 )
 
 var (
+	setupRegions        []string
+	setupClean          bool
+	setupKubeconfigPath string
+	setupRolePrefixes   []string
+	setupReplaceProfile string
+	setupRoleARN        string
+
 	kubernetesSetupCmd = &cobra.Command{
 		Use:   "setup",
-		Short: "Setup and configure EKS clusters in kubeconfig",
-		Long:  `Setup and configure EKS clusters in kubeconfig by fetching clusters from all AWS accounts and updating the kubeconfig file.`,
-		Run:   kubernetesSetup,
+		Short: "Import EKS clusters into your kubeconfig",
+		Long: `Scan every AWS account you can reach for EKS clusters and add them to your
+kubeconfig. Existing contexts are kept unless --clean is passed.`,
+		RunE: runKubernetesSetup,
 	}
 )
 
 func init() {
 	kubernetesCmd.AddCommand(kubernetesSetupCmd)
-	kubernetesSetupCmd.Flags().StringSlice("regions", []string{"us-west-2"}, "List of AWS regions to scan")
-	kubernetesSetupCmd.Flags().Bool("clean", true, "Clean kubeconfig before configuring")
-	kubernetesSetupCmd.Flags().String("kubeconfig-path", "~/.kube/config", "Path to kubeconfig")
-	kubernetesSetupCmd.Flags().StringSlice("role-prefixs", []string{"readonly", "read-only"}, "Role prefixs to scan")
-	kubernetesSetupCmd.Flags().String("replace-profile", "", "Replace profile in kubeconfig")
-	kubernetesSetupCmd.Flags().String("role-arn", "", "Specific Role ARN to use for authentication (mutually exclusive with role-prefixs)")
+	f := kubernetesSetupCmd.Flags()
+	f.StringSliceVar(&setupRegions, "regions", []string{"us-west-2"}, "AWS regions to scan")
+	f.BoolVar(&setupClean, "clean", false, "Replace the kubeconfig instead of merging into it")
+	f.StringVar(&setupKubeconfigPath, "kubeconfig-path", "~/.kube/config", "Path to the kubeconfig to update")
+	f.StringSliceVar(&setupRolePrefixes, "role-prefixes", []string{"readonly", "read-only"}, "Prefer roles whose name contains one of these")
+	f.StringVar(&setupReplaceProfile, "replace-profile", "", "Use this profile for every context")
+	f.StringVar(&setupRoleARN, "role-arn", "", "Use one specific role ARN instead of matching prefixes")
+	kubernetesSetupCmd.MarkFlagsMutuallyExclusive("role-prefixes", "role-arn")
 }
 
-// ConfigureAllEKSClusters is the complete flow to configure all EKS clusters
-func ConfigureAllEKSClusters(ctx context.Context, regions []string, cleanKubeconfig bool, kubeconfigPath string, rolePrefixs []string, replaceProfile string, roleARN string) error {
-	// Step 1: Clean kubeconfig if required
-	if cleanKubeconfig {
-		fmt.Println("🧹 Cleaning kubeconfig...")
-		if err := services_kubernetes.CleanKubeconfig(kubeconfigPath); err != nil {
-			return fmt.Errorf("failed to clean kubeconfig: %w", err)
-		}
-		fmt.Println()
+func runKubernetesSetup(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
+	rolePrefixes := setupRolePrefixes
+	if setupRoleARN != "" {
+		rolePrefixes = nil
 	}
 
-	// Step 2: Get all clusters from all accounts with a spinner
-	var clusters []services_aws.EKSCluster
-	err := animation.ShowSpinner("Fetching EKS clusters from all accounts", func() error {
-		var err error
-		clusters, err = services_aws.GetClustersFromAllAccounts(ctx, regions, rolePrefixs, roleARN)
-		return err
-	})
+	if setupClean {
+		backup, err := services_kubernetes.BackupKubeconfig(setupKubeconfigPath)
+		if err != nil {
+			return err
+		}
+		if backup != "" {
+			ui.Warn("Replaced your kubeconfig")
+			ui.Detail("previous version saved at %s", backup)
+		}
+	}
 
+	services_aws.ResetThrottleCount()
+
+	var clusters []services_aws.EKSCluster
+	var scanErrs []error
+	err := animation.Spin(ctx, "Scanning AWS accounts for EKS clusters",
+		func(ctx context.Context, note animation.Progress) error {
+			done := reportScanProgress(ctx, note)
+			defer done()
+
+			var err error
+			clusters, scanErrs, err = services_aws.GetClustersFromAllAccounts(ctx, setupRegions, rolePrefixes, setupRoleARN)
+			return err
+		})
 	if err != nil {
-		return fmt.Errorf("failed to get clusters: %w", err)
+		return err
+	}
+
+	if n := services_aws.ThrottleCount(); n > 0 {
+		ui.Warn("AWS rate limited %d requests; ark backed off and retried them", n)
+		ui.Hint("scan fewer regions or accounts at once if this keeps happening")
+	}
+
+	for _, e := range scanErrs {
+		ui.Warn("Skipped an account: %s", ui.Reason(e))
 	}
 
 	if len(clusters) == 0 {
-		fmt.Println("\nNo EKS clusters found in any account")
+		ui.Warn("No EKS clusters found in %v", setupRegions)
 		return nil
 	}
 
-	fmt.Printf("\n✓ Total clusters found: %d\n", len(clusters))
-
-	// Show clusters summary per account
-	accountClusters := make(map[string]int)
-	for _, cluster := range clusters {
-		accountClusters[cluster.AccountID]++
-	}
-	fmt.Println("\nClusters by account:")
-	for accountID, count := range accountClusters {
-		fmt.Printf("  - Account %s: %d cluster(s)\n", accountID, count)
+	report, err := controllers_k8s.ConfigureClusters(ctx, clusters, setupKubeconfigPath, setupReplaceProfile)
+	if err != nil {
+		return err
 	}
 
-	fmt.Println()
-
-	// Step 3: Configure kubeconfig for all clusters with progress bar
-	if err := controllers_k8s.UpdateKubeconfigWithProgress(clusters, replaceProfile); err != nil {
-		return fmt.Errorf("failed to update kubeconfig: %w", err)
+	for _, e := range report.Skipped {
+		ui.Warn("%s", ui.Reason(e))
 	}
 
+	regions := map[string]int{}
+	for _, c := range clusters {
+		regions[c.Region]++
+	}
+	summary := [][2]string{
+		{"clusters", ui.Strong.Render(fmt.Sprint(len(report.Configured)))},
+		{"regions", fmt.Sprint(len(regions))},
+		{"kubeconfig", setupKubeconfigPath},
+	}
+	if n := services_aws.ThrottleCount(); n > 0 {
+		summary = append(summary, [2]string{"throttled", fmt.Sprint(n)})
+	}
+
+	ui.Blank()
+	ui.Done("Kubeconfig updated")
+	ui.Summary(summary...)
+	ui.Hint("ark k8s  to switch cluster")
+
+	for _, name := range report.Configured {
+		ui.Result("%s", name)
+	}
 	return nil
-}
-
-func kubernetesSetup(cmd *cobra.Command, args []string) {
-	regions, _ := cmd.Flags().GetStringSlice("regions")
-	cleanConfig, _ := cmd.Flags().GetBool("clean")
-	kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path")
-	replaceProfile, _ := cmd.Flags().GetString("replace-profile")
-	rolePrefixs, _ := cmd.Flags().GetStringSlice("role-prefixs")
-	roleARN, _ := cmd.Flags().GetString("role-arn")
-
-	ctx := context.Background()
-
-	// Validate flags exclusivity
-	if cmd.Flags().Changed("role-prefixs") && cmd.Flags().Changed("role-arn") {
-		fmt.Println("Error: --role-prefixs and --role-arn are mutually exclusive")
-		return
-	}
-
-	// If role-arn is provided, we don't use prefixes
-	if roleARN != "" {
-		rolePrefixs = nil
-	} else if !cmd.Flags().Changed("role-prefixs") {
-		// Only use defaults if the flag hasn't changed and there is no ARN
-		fmt.Println("No role prefixs or ARN provided, using default prefixs: readonly, read-only")
-		rolePrefixs = []string{"readonly", "read-only"}
-	}
-
-	if err := ConfigureAllEKSClusters(ctx, regions, cleanConfig, kubeconfigPath, rolePrefixs, replaceProfile, roleARN); err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
 }

@@ -23,4 +23,3 @@ func OpenBrowser(url string) error {
 
 	return err
 }
-

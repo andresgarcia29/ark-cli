@@ -1,111 +1,127 @@
 package animation
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 )
 
-// SpinnerModel represents the spinner model
-type SpinnerModel struct {
-	spinner  spinner.Model
-	message  string
-	quitting bool
-	done     bool
+type spinnerModel struct {
+	spinner spinner.Model
+	message string
+	note    string
+	started time.Time
+	width   int
 }
 
-// NewSpinnerModel creates a new spinner model
-func NewSpinnerModel(message string) SpinnerModel {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	return SpinnerModel{
-		spinner: s,
-		message: message,
-	}
-}
+// noteMsg replaces the line under the spinner with fresh progress detail.
+type noteMsg string
 
-// Init implements tea.Model
-func (m SpinnerModel) Init() tea.Cmd {
-	return m.spinner.Tick
-}
+// finishedMsg ends the spinner once the work returns.
+type finishedMsg struct{}
 
-// Update implements tea.Model
-func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m spinnerModel) Init() tea.Cmd { return m.spinner.Tick }
+
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			m.quitting = true
+	case finishedMsg:
+		return m, tea.Quit
+	case noteMsg:
+		m.note = string(msg)
+		return m, nil
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+	case tea.KeyPressMsg:
+		if k := msg.Key(); k.Mod&tea.ModCtrl != 0 && (k.Code == 'c' || k.Code == 'd') {
 			return m, tea.Quit
 		}
 		return m, nil
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
-
-	case doneMsg:
-		m.done = true
-		return m, tea.Quit
-
-	case tea.QuitMsg:
-		m.quitting = true
-		return m, nil
-
-	default:
-		return m, nil
 	}
+	return m, nil
 }
 
-// View implements tea.Model
-func (m SpinnerModel) View() string {
-	if m.done {
-		checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
-		return checkStyle.Render(fmt.Sprintf("✓ %s\n", m.message))
-	}
+func (m spinnerModel) View() tea.View {
+	var b strings.Builder
+	b.WriteString(m.spinner.View())
+	b.WriteString(" ")
+	b.WriteString(m.message)
 
-	if m.quitting {
-		return ""
+	// Elapsed time makes a slow scan legible as progress rather than a hang.
+	if elapsed := time.Since(m.started); elapsed > 3*time.Second {
+		b.WriteString(" ")
+		b.WriteString(ui.Faint.Render(fmt.Sprintf("%s %s", ui.GlyphDot, elapsed.Round(time.Second))))
 	}
-
-	messageStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	return fmt.Sprintf("%s %s\n", m.spinner.View(), messageStyle.Render(m.message))
+	if m.note != "" {
+		b.WriteString("\n  ")
+		b.WriteString(ui.Muted.Render(truncate(m.note, m.width-4)))
+	}
+	b.WriteString("\n")
+	return tea.NewView(b.String())
 }
 
-// doneMsg is a message to indicate that the spinner should terminate
-type doneMsg struct{}
-
-// Done returns a command that sends a completion message
-func Done() tea.Msg {
-	return doneMsg{}
+// truncate shortens s to fit width, so a long note never wraps and smears the
+// spinner across several lines.
+func truncate(s string, width int) string {
+	if width <= 1 || len(s) <= width {
+		return s
+	}
+	return s[:width-1] + "…"
 }
 
-// ShowSpinner shows a spinner while executing a function
-func ShowSpinner(message string, fn func() error) error {
-	p := tea.NewProgram(NewSpinnerModel(message))
+// Progress reports incremental detail from inside a spinner.
+type Progress func(format string, a ...any)
 
-	// Channel to handle the function result
-	errChan := make(chan error, 1)
+// Spin runs work while showing a spinner, cancelling it if the user hits
+// ctrl+c. When stderr is not a terminal it prints one line and runs work
+// directly, so logs and CI output stay clean.
+func Spin(ctx context.Context, message string, work func(context.Context, Progress) error) error {
+	if !ui.Interactive() {
+		ui.Step("%s", message)
+		return work(ctx, func(string, ...any) {})
+	}
 
-	// Execute the function in a goroutine
+	s := spinner.New(
+		spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(ui.Accent),
+	)
+
+	p := tea.NewProgram(
+		spinnerModel{spinner: s, message: message, started: time.Now(), width: ui.Width()},
+		tea.WithOutput(ui.Err),
+		tea.WithContext(ctx),
+	)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 1)
 	go func() {
-		err := fn()
-		errChan <- err
-		// Send completion message to the program
-		time.Sleep(100 * time.Millisecond) // Small pause for the spinner to be visible
-		p.Send(Done())
+		errCh <- work(ctx, func(format string, a ...any) {
+			p.Send(noteMsg(fmt.Sprintf(format, a...)))
+		})
+		p.Send(finishedMsg{})
 	}()
 
-	// Run the program (this will block until it finishes)
 	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("error running spinner: %w", err)
+		// The UI stopped, most likely ctrl+c. Cancel the work and report it.
+		cancel()
+		<-errCh
+		return fmt.Errorf("cancelled: %w", err)
 	}
 
-	// Get the function result
-	return <-errChan
+	if err := <-errCh; err != nil {
+		return err
+	}
+	ui.Done("%s", message)
+	return nil
 }

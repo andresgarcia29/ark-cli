@@ -1,122 +1,58 @@
+// Package logs provides ark's diagnostic log. It is separate from user-facing
+// output: everything here is for debugging and stays silent unless asked for.
 package logs
 
 import (
-	"os"
 	"sync"
 
-	"github.com/google/uuid"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 var (
-	globalLogger     *zap.SugaredLogger
-	globalLoggerOnce sync.Once
-	logLevel         = zap.NewAtomicLevelAt(zapcore.InfoLevel)
+	logger *zap.SugaredLogger
+	once   sync.Once
+	level  = zap.NewAtomicLevelAt(zapcore.ErrorLevel)
 )
 
-// LogConfig configures the logger behavior
-type LogConfig struct {
-	Level      string // debug, info, warn, error
-	Format     string // json, console
-	OutputPath string // stdout, stderr, or file path
-}
-
-// DefaultLogConfig returns a default logging configuration
-func DefaultLogConfig() LogConfig {
-	return LogConfig{
-		Level:      "info",
-		Format:     "console",
-		OutputPath: "stdout",
+// Init configures the diagnostic log. Without debug it stays effectively
+// silent, because user-facing messages are the ui package's job.
+func Init(debug bool) {
+	once.Do(build)
+	if debug {
+		level.SetLevel(zapcore.DebugLevel)
+	} else {
+		// Errors already travel back to the caller as values and get reported
+		// once by the command layer; logging them again would duplicate them.
+		level.SetLevel(zapcore.FatalLevel)
 	}
 }
 
-// InitLogger initializes the global logger with the provided configuration
-// This should be called once at application startup
-func InitLogger(config LogConfig) error {
-	var err error
-	globalLoggerOnce.Do(func() {
-		// Parse log level
-		var level zapcore.Level
-		err = level.UnmarshalText([]byte(config.Level))
-		if err != nil {
-			level = zapcore.InfoLevel
-		}
-		logLevel.SetLevel(level)
+func build() {
+	cfg := zap.NewDevelopmentEncoderConfig()
+	cfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05.000")
 
-		// Configure encoder
-		var encoderConfig zapcore.EncoderConfig
-		if config.Format == "json" {
-			encoderConfig = zap.NewProductionEncoderConfig()
-		} else {
-			encoderConfig = zap.NewDevelopmentEncoderConfig()
-			encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-		}
-
-		// Configure output
-		var output zapcore.WriteSyncer
-		switch config.OutputPath {
-		case "stdout":
-			output = zapcore.AddSync(os.Stdout)
-		case "stderr":
-			output = zapcore.AddSync(os.Stderr)
-		default:
-			file, fileErr := os.OpenFile(config.OutputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if fileErr != nil {
-				err = fileErr
-				return
-			}
-			output = zapcore.AddSync(file)
-		}
-
-		// Create encoder
-		var encoder zapcore.Encoder
-		if config.Format == "json" {
-			encoder = zapcore.NewJSONEncoder(encoderConfig)
-		} else {
-			encoder = zapcore.NewConsoleEncoder(encoderConfig)
-		}
-
-		// Create core
-		core := zapcore.NewCore(encoder, output, logLevel)
-
-		// Create logger
-		logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
-		globalLogger = logger.Sugar()
-	})
-	return err
+	// Diagnostics go to stderr so stdout stays parseable, and stack traces are
+	// left out because they are noise for a CLI user.
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(cfg),
+		zapcore.AddSync(ui.Err),
+		level,
+	)
+	logger = zap.New(core).Sugar()
 }
 
-// GetLogger returns the global logger instance
-// If the logger hasn't been initialized, it will be initialized with default config
+// GetLogger returns the diagnostic logger.
 func GetLogger() *zap.SugaredLogger {
-	if globalLogger == nil {
-		_ = InitLogger(DefaultLogConfig())
-	}
-	return globalLogger
+	once.Do(build)
+	return logger
 }
 
-// SetLogLevel changes the global log level dynamically
-func SetLogLevel(level string) error {
-	var lvl zapcore.Level
-	if err := lvl.UnmarshalText([]byte(level)); err != nil {
-		return err
-	}
-	logLevel.SetLevel(lvl)
-	return nil
-}
-
-// GetTraceID generates a unique trace ID for request tracking
-func GetTraceID() string {
-	uuidWithHyphen := uuid.New()
-	return uuidWithHyphen.String()
-}
-
-// Sync flushes any buffered log entries
-// Should be called before application exit
+// Sync flushes buffered entries before exit.
 func Sync() {
-	if globalLogger != nil {
-		_ = globalLogger.Sync()
+	if logger != nil {
+		_ = logger.Sync()
 	}
 }

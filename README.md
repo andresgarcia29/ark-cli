@@ -1,7 +1,6 @@
 # ark-cli
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/andresgarcia29/ark-cli)](https://goreportcard.com/report/github.com/andresgarcia29/ark-cli)
-[![Coverage Status](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/andresgarcia29/ark-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A powerful command-line interface for AWS and Kubernetes operations, designed to streamline your cloud workflow.
@@ -10,7 +9,9 @@ A powerful command-line interface for AWS and Kubernetes operations, designed to
 
 - **AWS Operations**: Login, SSO, and credential management
 - **Kubernetes Integration**: Seamless k8s operations
-- **Parallel Processing**: Efficient handling of multiple operations (see [PARALLELIZATION.md](PARALLELIZATION.md))
+- **Parallel Processing**: Accounts and regions are scanned concurrently
+- **Native kubeconfig**: Entries are written directly by ark, not by spawning `aws eks update-kubeconfig` per cluster
+- **Throttle aware**: AWS rate limiting is retried with adaptive backoff and reported instead of looking like a hang
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Auto-Browser**: Automatically opens browser for AWS SSO authentication
 
@@ -65,15 +66,36 @@ Interactive cluster selector. Lists all clusters in your `kubeconfig` and lets y
 
 #### `ark k8s setup`
 Scans AWS accounts for EKS clusters and configures them in your `kubeconfig`.
-- `--role-prefixs`: (Optional) Comma-separated list of role prefixes to search for (default: `readonly,read-only`).
-- `--role-arn`: (Optional) Specific static Role ARN to use. **Mutually exclusive with `--role-prefixs`**.
+
+Cluster details are read once via `eks:DescribeCluster` during the scan and the
+kubeconfig is written in a single pass, so hundreds of clusters take seconds
+rather than minutes. Re-running updates entries in place. The AWS CLI is still
+needed at *connect* time, because kubectl calls `aws eks get-token`.
+- `--role-prefixes`: (Optional) Comma-separated list of role prefixes to search for (default: `readonly,read-only`).
+- `--role-arn`: (Optional) Specific static Role ARN to use. **Mutually exclusive with `--role-prefixes`**.
 - `--regions`: (Optional) List of AWS regions to scan (default: `us-west-2`).
-- `--clean`: (Optional) Clean `kubeconfig` before configuring (default: `true`).
+- `--clean`: (Optional) Replace `kubeconfig` instead of merging into it (default: `false`). The previous file is kept as a timestamped backup.
 - `--kubeconfig-path`: (Optional) Path to `kubeconfig` (default: `~/.kube/config`).
 - `--replace-profile`: (Optional) Replace profile in `kubeconfig` with a specific one.
 
 #### `ark k8s diagnose`
 Diagnoses common issues with your Kubernetes and `kubectl` configuration.
+
+### Terminal Output
+
+The interface adapts to where it is running: colours follow a palette that
+adjusts to light and dark terminals, and `NO_COLOR`, dumb terminals and
+redirected output automatically degrade to plain ASCII with no escape codes.
+Interactive pickers and spinners are skipped entirely when stderr is not a
+terminal, so CI logs stay readable.
+
+### Global Flags
+
+- `--debug`, `-d`: Show internal diagnostics on stderr.
+- `--quiet`, `-q`: Only print results and failures.
+
+Results go to stdout and progress to stderr, so `ark k8s setup -q` can be piped.
+Commands exit non-zero on failure, and `130` when you cancel.
 
 ### ℹ️ General Commands
 

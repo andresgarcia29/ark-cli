@@ -1,56 +1,44 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
-
 	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
-	animation "github.com/andresgarcia29/ark-cli/lib/animation"
+	"github.com/andresgarcia29/ark-cli/lib/animation"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 	"github.com/spf13/cobra"
 )
 
-var (
-	awsCmd = &cobra.Command{
-		Use:   "aws",
-		Short: "AWS related operations",
-		Long:  `AWS related operations - Interactive profile selection and login`,
-		Run:   aws,
-	}
-)
+var awsCmd = &cobra.Command{
+	Use:   "aws",
+	Short: "Sign in to AWS",
+	Long:  "Pick one of your configured AWS profiles and sign in.",
+	RunE:  runAWS,
+}
 
 func init() {
 	rootCmd.AddCommand(awsCmd)
 }
 
-func aws(cmd *cobra.Command, args []string) {
-	// Create context
-	ctx := context.Background()
-
-	// Show interactive profile selector
-	selectedProfile, err := animation.InteractiveProfileSelector()
+func runAWS(cmd *cobra.Command, args []string) error {
+	profiles, err := services_aws.ReadAllProfilesFromConfig()
 	if err != nil {
-		fmt.Printf("❌ Error selecting profile: %v\n", err)
-		return
+		return err
+	}
+	if len(profiles) == 0 {
+		ui.Fail("No profiles found in ~/.aws/config")
+		ui.Hint("ark aws sso --start-url <your SSO url>")
+		return errQuiet
 	}
 
-	// Show selected profile information
-	fmt.Printf("\n✅ Selected profile: %s (%s)\n", selectedProfile.ProfileName, selectedProfile.ProfileType)
-	fmt.Println("🔐 Logging in...")
-
-	// Resolve SSO configuration (can come from source profile for assume role)
-	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(selectedProfile.ProfileName)
+	profile, err := animation.SelectProfile(profiles)
 	if err != nil {
-		fmt.Printf("Error resolving SSO configuration: %v\n", err)
-		return
+		return err
 	}
 
-	// Perform login with the selected profile using retry
-	if err := controllers.AttemptLoginWithRetry(ctx, selectedProfile.ProfileName, true, ssoRegion, ssoStartURL); err != nil {
-		fmt.Printf("❌ Login failed after retry: %v\n", err)
-		return
+	if err := controllers.Login(cmd.Context(), profile.ProfileName, true); err != nil {
+		return err
 	}
 
-	fmt.Printf("🎉 Successfully logged in with profile: %s\n", selectedProfile.ProfileName)
-	fmt.Println("💡 You can now use AWS CLI commands with this profile")
+	ui.Done("Signed in as %s", ui.Strong.Render(profile.ProfileName))
+	return nil
 }

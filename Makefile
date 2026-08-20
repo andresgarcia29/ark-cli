@@ -1,20 +1,25 @@
-.PHONY: test coverage help
+.PHONY: test coverage lint build help
 
-# Run all tests
+# Run all tests with the race detector
 test:
-	go test -v -race ./...
+	go test -race ./...
 
-# Run tests with coverage and generate HTML report
+# Run tests with coverage and generate an HTML report
 coverage:
-	go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated at coverage.html"
-	@go tool cover -func=coverage.out | grep total
+	@go tool cover -func=coverage.out | tail -1
 
-# Show help
+# Vet and format check
+lint:
+	gofmt -l .
+	go vet ./...
+
+build:
+	go build -o bin/ark .
+
 help:
-	@echo "Available targets:"
-	@echo "  test      - Run all tests"
-	@echo "  coverage  - Run tests with coverage and generate HTML report"
-	@echo "  help      - Show this help message"
-
+	@echo "test      - Run all tests with -race"
+	@echo "coverage  - Run tests and write coverage.html"
+	@echo "lint      - gofmt check and go vet"
+	@echo "build     - Build ./bin/ark"

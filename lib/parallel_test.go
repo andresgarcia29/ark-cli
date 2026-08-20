@@ -3,545 +3,197 @@ package lib
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
-func TestDefaultParallelConfig(t *testing.T) {
-	config := DefaultParallelConfig()
-
-	assert.Equal(t, 10, config.MaxWorkers)
-	assert.Equal(t, 5*time.Minute, config.Timeout)
-	assert.Equal(t, 100*time.Millisecond, config.RateLimitDelay)
-	assert.Equal(t, 3, config.MaxRetries)
-	assert.Equal(t, 1*time.Second, config.RetryDelay)
+func fastLimits() Limits {
+	return Limits{MaxWorkers: 4, Timeout: 5 * time.Second, Rate: 1000, MaxRetries: 2, RetryDelay: time.Millisecond}
 }
 
-func TestConservativeConfig(t *testing.T) {
-	config := ConservativeConfig()
+func TestMapConcurrentCollectsResultsAndErrors(t *testing.T) {
+	keys := []string{"a", "b", "bad", "c"}
 
-	assert.Equal(t, 5, config.MaxWorkers)
-	assert.Equal(t, 10*time.Minute, config.Timeout)
-	assert.Equal(t, 500*time.Millisecond, config.RateLimitDelay)
-	assert.Equal(t, 5, config.MaxRetries)
-	assert.Equal(t, 2*time.Second, config.RetryDelay)
-}
-
-func TestAggressiveConfig(t *testing.T) {
-	config := AggressiveConfig()
-
-	assert.Equal(t, 20, config.MaxWorkers)
-	assert.Equal(t, 3*time.Minute, config.Timeout)
-	assert.Equal(t, 50*time.Millisecond, config.RateLimitDelay)
-	assert.Equal(t, 2, config.MaxRetries)
-	assert.Equal(t, 500*time.Millisecond, config.RetryDelay)
-}
-
-func TestNewWorkerPool(t *testing.T) {
-	tests := []struct {
-		name       string
-		maxWorkers int
-		expected   int
-	}{
-		{
-			name:       "valid max workers",
-			maxWorkers: 5,
-			expected:   5,
-		},
-		{
-			name:       "zero max workers",
-			maxWorkers: 0,
-			expected:   0,
-		},
-		{
-			name:       "negative max workers",
-			maxWorkers: -1,
-			expected:   -1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.maxWorkers < 0 {
-				// Negative workers should panic
-				assert.Panics(t, func() {
-					NewWorkerPool(tt.maxWorkers)
-				})
-			} else {
-				pool := NewWorkerPool(tt.maxWorkers)
-
-				assert.NotNil(t, pool)
-				assert.Equal(t, tt.expected, pool.maxWorkers)
-				assert.NotNil(t, pool.semaphore)
-				assert.Equal(t, tt.expected, cap(pool.semaphore))
+	got, errs := MapConcurrent(context.Background(), keys, fastLimits(),
+		func(ctx context.Context, key string) (string, error) {
+			if key == "bad" {
+				return "", Permanent(errors.New("nope"))
 			}
+			return strings.ToUpper(key), nil
 		})
+
+	if len(got) != 3 {
+		t.Errorf("got %d results, want 3: %v", len(got), got)
+	}
+	if got["a"] != "A" || got["c"] != "C" {
+		t.Errorf("wrong values: %v", got)
+	}
+	if _, ok := got["bad"]; ok {
+		t.Error("a failed key must not appear in the results")
+	}
+	if len(errs) != 1 {
+		t.Fatalf("got %d errors, want 1: %v", len(errs), errs)
+	}
+	// The error must name the key it belongs to.
+	if !strings.Contains(errs[0].Error(), "bad") {
+		t.Errorf("error %q does not identify the key", errs[0])
 	}
 }
 
-func TestWorkerPoolExecute(t *testing.T) {
-	tests := []struct {
-		name             string
-		maxWorkers       int
-		fn               func() error
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name:             "successful execution",
-			maxWorkers:       1,
-			fn:               func() error { return nil },
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name:             "function error",
-			maxWorkers:       1,
-			fn:               func() error { return errors.New("test error") },
-			expectedError:    true,
-			expectedErrorMsg: "test error",
-		},
-		{
-			name:             "zero workers",
-			maxWorkers:       0,
-			fn:               func() error { return nil },
-			expectedError:    true,
-			expectedErrorMsg: "context deadline exceeded",
-		},
+// One failing key must never abort the others.
+func TestMapConcurrentIsolatesFailures(t *testing.T) {
+	keys := make([]string, 20)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("k%02d", i)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pool := NewWorkerPool(tt.maxWorkers)
-			ctx := context.Background()
-
-			// For zero workers test, use a timeout context to avoid hanging
-			if tt.maxWorkers == 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
-				defer cancel()
+	got, errs := MapConcurrent(context.Background(), keys, fastLimits(),
+		func(ctx context.Context, key string) (int, error) {
+			if strings.HasSuffix(key, "3") {
+				return 0, Permanent(errors.New("boom"))
 			}
-
-			err := pool.Execute(ctx, tt.fn)
-
-			if tt.expectedError {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedErrorMsg, err.Error())
-			} else {
-				assert.NoError(t, err)
-			}
+			return 1, nil
 		})
+
+	if len(got)+len(errs) != len(keys) {
+		t.Errorf("accounted for %d of %d keys", len(got)+len(errs), len(keys))
+	}
+	if len(errs) != 2 {
+		t.Errorf("got %d errors, want 2", len(errs))
 	}
 }
 
-func TestWorkerPoolExecuteContextCancellation(t *testing.T) {
-	pool := NewWorkerPool(1)
-	ctx, cancel := context.WithCancel(context.Background())
+func TestMapConcurrentRespectsWorkerLimit(t *testing.T) {
+	keys := make([]string, 30)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("k%d", i)
+	}
 
-	// Cancel the context immediately
-	cancel()
+	var inFlight, peak atomic.Int64
+	limits := fastLimits()
+	limits.MaxWorkers = 4
 
-	err := pool.Execute(ctx, func() error {
+	MapConcurrent(context.Background(), keys, limits, func(ctx context.Context, key string) (bool, error) {
+		n := inFlight.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		inFlight.Add(-1)
+		return true, nil
+	})
+
+	if peak.Load() > int64(limits.MaxWorkers) {
+		t.Errorf("ran %d workers at once, limit is %d", peak.Load(), limits.MaxWorkers)
+	}
+}
+
+func TestMapConcurrentEmptyInput(t *testing.T) {
+	got, errs := MapConcurrent(context.Background(), nil, fastLimits(),
+		func(ctx context.Context, key string) (int, error) { return 1, nil })
+	if len(got) != 0 || len(errs) != 0 {
+		t.Errorf("empty input produced %v / %v", got, errs)
+	}
+}
+
+func TestRetryRetriesThenSucceeds(t *testing.T) {
+	var calls int
+	err := Retry(context.Background(), fastLimits(), func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("temporary")
+		}
 		return nil
 	})
 
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-func TestGetWorkerPool(t *testing.T) {
-	tests := []struct {
-		name       string
-		maxWorkers int
-		expected   int
-	}{
-		{
-			name:       "valid max workers",
-			maxWorkers: 5,
-			expected:   5,
-		},
-		{
-			name:       "zero max workers",
-			maxWorkers: 0,
-			expected:   0,
-		},
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pool := GetWorkerPool(tt.maxWorkers)
-
-			assert.NotNil(t, pool)
-			assert.Equal(t, tt.expected, pool.maxWorkers)
-		})
+	if calls != 3 {
+		t.Errorf("called %d times, want 3", calls)
 	}
 }
 
-func TestExecuteWithRetry(t *testing.T) {
-	tests := []struct {
-		name             string
-		config           ParallelConfig
-		operation        func() error
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name:             "successful operation",
-			config:           DefaultParallelConfig(),
-			operation:        func() error { return nil },
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name:   "operation fails once then succeeds",
-			config: ParallelConfig{MaxRetries: 1, RetryDelay: 1 * time.Millisecond},
-			operation: func() error {
-				// Simulate failure on first attempt, success on second
-				return nil
-			},
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name:             "operation always fails",
-			config:           ParallelConfig{MaxRetries: 2, RetryDelay: 1 * time.Millisecond},
-			operation:        func() error { return errors.New("persistent error") },
-			expectedError:    true,
-			expectedErrorMsg: "operation failed after 3 attempts: persistent error",
-		},
-		{
-			name:             "zero retries",
-			config:           ParallelConfig{MaxRetries: 0, RetryDelay: 1 * time.Millisecond},
-			operation:        func() error { return errors.New("error") },
-			expectedError:    true,
-			expectedErrorMsg: "operation failed after 1 attempts: error",
-		},
+func TestRetryGivesUpAndWrapsLastError(t *testing.T) {
+	sentinel := errors.New("still broken")
+	err := Retry(context.Background(), fastLimits(), func() error { return sentinel })
+
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error chain lost the cause: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-
-			err := ExecuteWithRetry(ctx, tt.config, tt.operation)
-
-			if tt.expectedError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.expectedErrorMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
+	if !strings.Contains(err.Error(), "3 attempts") {
+		t.Errorf("error %q should report the attempt count", err)
 	}
 }
 
-func TestExecuteWithRetryContextCancellation(t *testing.T) {
-	config := ParallelConfig{MaxRetries: 5, RetryDelay: 100 * time.Millisecond}
-	ctx, cancel := context.WithCancel(context.Background())
+// A missing profile or bad ARN cannot be fixed by waiting.
+func TestRetrySkipsPermanentErrors(t *testing.T) {
+	var calls int
+	start := time.Now()
+	limits := fastLimits()
+	limits.RetryDelay = 200 * time.Millisecond
 
-	// Cancel the context after a short delay
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-
-	err := ExecuteWithRetry(ctx, config, func() error {
-		return errors.New("test error")
+	err := Retry(context.Background(), limits, func() error {
+		calls++
+		return Permanent(errors.New("no such profile"))
 	})
 
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestNewRateLimiter(t *testing.T) {
-	tests := []struct {
-		name  string
-		delay time.Duration
-	}{
-		{
-			name:  "100ms delay",
-			delay: 100 * time.Millisecond,
-		},
-		{
-			name:  "1 second delay",
-			delay: 1 * time.Second,
-		},
-		{
-			name:  "zero delay",
-			delay: 0,
-		},
+	if calls != 1 {
+		t.Errorf("permanent error retried %d times", calls)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			limiter := NewRateLimiter(tt.delay)
-
-			assert.NotNil(t, limiter)
-			assert.Equal(t, tt.delay, limiter.delay)
-		})
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Errorf("permanent error still waited %v", elapsed)
+	}
+	if !strings.Contains(err.Error(), "no such profile") {
+		t.Errorf("error text lost: %v", err)
 	}
 }
 
-func TestRateLimiterWait(t *testing.T) {
-	tests := []struct {
-		name          string
-		delay         time.Duration
-		expectedError bool
-	}{
-		{
-			name:          "no delay",
-			delay:         0,
-			expectedError: false,
-		},
-		{
-			name:          "short delay",
-			delay:         1 * time.Millisecond,
-			expectedError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			limiter := NewRateLimiter(tt.delay)
-			ctx := context.Background()
-
-			err := limiter.Wait(ctx)
-
-			if tt.expectedError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestRateLimiterWaitContextCancellation(t *testing.T) {
-	limiter := NewRateLimiter(100 * time.Millisecond)
+func TestRetryStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	// Cancel the context immediately
 	cancel()
 
-	err := limiter.Wait(ctx)
+	var calls int
+	err := Retry(ctx, fastLimits(), func() error {
+		calls++
+		return errors.New("fail")
+	})
 
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-}
-
-func TestProcessAccountsInParallel(t *testing.T) {
-	tests := []struct {
-		name            string
-		accounts        []string
-		config          ParallelConfig
-		processor       func(ctx context.Context, accountID string) (string, error)
-		expectedError   bool
-		expectedResults int
-		expectedErrors  int
-	}{
-		{
-			name:            "successful processing",
-			accounts:        []string{"account1", "account2"},
-			config:          ParallelConfig{MaxWorkers: 2, Timeout: 1 * time.Second, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond},
-			processor:       func(ctx context.Context, accountID string) (string, error) { return "result-" + accountID, nil },
-			expectedError:   false,
-			expectedResults: 2,
-			expectedErrors:  0,
-		},
-		{
-			name:     "some accounts fail",
-			accounts: []string{"account1", "account2", "account3"},
-			config:   ParallelConfig{MaxWorkers: 2, Timeout: 1 * time.Second, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond},
-			processor: func(ctx context.Context, accountID string) (string, error) {
-				if accountID == "account2" {
-					return "", errors.New("account2 failed")
-				}
-				return "result-" + accountID, nil
-			},
-			expectedError:   false,
-			expectedResults: 2,
-			expectedErrors:  1,
-		},
-		{
-			name:            "empty accounts list",
-			accounts:        []string{},
-			config:          DefaultParallelConfig(),
-			processor:       func(ctx context.Context, accountID string) (string, error) { return "result", nil },
-			expectedError:   false,
-			expectedResults: 0,
-			expectedErrors:  0,
-		},
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("want context.Canceled, got %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-
-			results, errors := ProcessAccountsInParallel(ctx, tt.accounts, tt.config, tt.processor)
-
-			assert.Equal(t, tt.expectedResults, len(results))
-			assert.Equal(t, tt.expectedErrors, len(errors))
-
-			// Verify results contain expected data
-			for accountID, result := range results {
-				assert.Contains(t, tt.accounts, accountID)
-				assert.NotEmpty(t, result)
-			}
-		})
+	if calls > 1 {
+		t.Errorf("kept retrying a cancelled context %d times", calls)
 	}
 }
 
-func TestProcessAccountsInParallelContextCancellation(t *testing.T) {
-	accounts := []string{"account1", "account2", "account3"}
-	config := ParallelConfig{MaxWorkers: 1, Timeout: 100 * time.Millisecond, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond}
+func TestMapConcurrentHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
 
-	// Cancel the context after a short delay
+	var started atomic.Int64
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
 
-	processor := func(ctx context.Context, accountID string) (string, error) {
-		// Simulate work that takes time
-		time.Sleep(200 * time.Millisecond)
-		return "result-" + accountID, nil
-	}
+	_, errs := MapConcurrent(ctx, keys, fastLimits(), func(ctx context.Context, key string) (int, error) {
+		started.Add(1)
+		select {
+		case <-time.After(2 * time.Second):
+			return 1, nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	})
 
-	results, errors := ProcessAccountsInParallel(ctx, accounts, config, processor)
-
-	// Should have some results and some errors due to cancellation
-	assert.GreaterOrEqual(t, len(results), 0)
-	assert.GreaterOrEqual(t, len(errors), 0)
-}
-
-func TestProcessAccountsInParallelTimeout(t *testing.T) {
-	accounts := []string{"account1", "account2", "account3"}
-	config := ParallelConfig{MaxWorkers: 1, Timeout: 100 * time.Millisecond, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond}
-	ctx := context.Background()
-
-	processor := func(ctx context.Context, accountID string) (string, error) {
-		// Simulate work that takes longer than timeout
-		time.Sleep(200 * time.Millisecond)
-		return "result-" + accountID, nil
-	}
-
-	results, errors := ProcessAccountsInParallel(ctx, accounts, config, processor)
-
-	// Should have some results and some errors due to timeout
-	assert.GreaterOrEqual(t, len(results), 0)
-	assert.GreaterOrEqual(t, len(errors), 0)
-}
-
-func TestAccountResultStruct(t *testing.T) {
-	// Test AccountResult struct fields
-	result := AccountResult{
-		AccountID: "123456789012",
-		Data:      "test-data",
-		Error:     nil,
-	}
-
-	assert.Equal(t, "123456789012", result.AccountID)
-	assert.Equal(t, "test-data", result.Data)
-	assert.NoError(t, result.Error)
-}
-
-func TestAccountResultWithError(t *testing.T) {
-	// Test AccountResult struct with error
-	err := errors.New("test error")
-	result := AccountResult{
-		AccountID: "123456789012",
-		Data:      nil,
-		Error:     err,
-	}
-
-	assert.Equal(t, "123456789012", result.AccountID)
-	assert.Nil(t, result.Data)
-	assert.Error(t, result.Error)
-	assert.Equal(t, "test error", result.Error.Error())
-}
-
-func TestParallelConfigStruct(t *testing.T) {
-	// Test ParallelConfig struct fields
-	config := ParallelConfig{
-		MaxWorkers:     5,
-		Timeout:        5 * time.Minute,
-		RateLimitDelay: 100 * time.Millisecond,
-		MaxRetries:     3,
-		RetryDelay:     1 * time.Second,
-	}
-
-	assert.Equal(t, 5, config.MaxWorkers)
-	assert.Equal(t, 5*time.Minute, config.Timeout)
-	assert.Equal(t, 100*time.Millisecond, config.RateLimitDelay)
-	assert.Equal(t, 3, config.MaxRetries)
-	assert.Equal(t, 1*time.Second, config.RetryDelay)
-}
-
-func TestWorkerPoolStruct(t *testing.T) {
-	// Test WorkerPool struct fields
-	pool := &WorkerPool{
-		maxWorkers: 5,
-		semaphore:  make(chan struct{}, 5),
-	}
-
-	assert.Equal(t, 5, pool.maxWorkers)
-	assert.NotNil(t, pool.semaphore)
-	assert.Equal(t, 5, cap(pool.semaphore))
-}
-
-func TestRateLimiterStruct(t *testing.T) {
-	// Test RateLimiter struct fields
-	limiter := &RateLimiter{
-		delay: 100 * time.Millisecond,
-	}
-
-	assert.Equal(t, 100*time.Millisecond, limiter.delay)
-}
-
-func TestProcessAccountsInParallelGeneric(t *testing.T) {
-	// Test generic type handling
-	accounts := []string{"account1", "account2"}
-	config := ParallelConfig{MaxWorkers: 2, Timeout: 1 * time.Second, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond}
-	ctx := context.Background()
-
-	// Test with string type
-	processor := func(ctx context.Context, accountID string) (string, error) {
-		return "result-" + accountID, nil
-	}
-
-	results, errors := ProcessAccountsInParallel(ctx, accounts, config, processor)
-
-	assert.Equal(t, 2, len(results))
-	assert.Equal(t, 0, len(errors))
-
-	// Verify results
-	for accountID, result := range results {
-		assert.Contains(t, accounts, accountID)
-		assert.Equal(t, "result-"+accountID, result)
-	}
-}
-
-func TestProcessAccountsInParallelWithDifferentTypes(t *testing.T) {
-	// Test with different return types
-	accounts := []string{"account1", "account2"}
-	config := ParallelConfig{MaxWorkers: 2, Timeout: 1 * time.Second, RateLimitDelay: 1 * time.Millisecond, MaxRetries: 1, RetryDelay: 1 * time.Millisecond}
-	ctx := context.Background()
-
-	// Test with int type
-	processor := func(ctx context.Context, accountID string) (int, error) {
-		return len(accountID), nil
-	}
-
-	results, errors := ProcessAccountsInParallel(ctx, accounts, config, processor)
-
-	assert.Equal(t, 2, len(results))
-	assert.Equal(t, 0, len(errors))
-
-	// Verify results
-	for accountID, result := range results {
-		assert.Contains(t, accounts, accountID)
-		assert.Equal(t, len(accountID), result)
+	if len(errs) == 0 {
+		t.Error("cancellation produced no errors")
 	}
 }

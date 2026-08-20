@@ -1,40 +1,31 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
-
 	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
 	"github.com/spf13/cobra"
 )
 
 var (
-	SSORegion   string
-	SSOStartURL string
+	ssoRegion   string
+	ssoStartURL string
 
-	awsSSOnCmd = &cobra.Command{
+	awsSSOCmd = &cobra.Command{
 		Use:   "sso",
-		Short: "Start a new AWS SSO session",
-		Long:  "Configure and start a new AWS SSO session with the provided profile, fetching the credentials from the AWS SSO cache",
-		Run:   awsSSOCommand,
+		Short: "Start a new SSO session",
+		Long:  "Authorize through the browser, then import every account and role you can reach into ~/.aws/config.",
+		RunE:  runAWSSSO,
 	}
 )
 
 func init() {
-	awsCmd.AddCommand(awsSSOnCmd)
-	awsSSOnCmd.Flags().StringVar(&SSORegion, "region", "us-east-1", "AWS SSO region")
-	awsSSOnCmd.Flags().StringVar(&SSOStartURL, "start-url", "", "AWS SSO start URL (required)")
-	if err := awsSSOnCmd.MarkFlagRequired("start-url"); err != nil {
+	awsCmd.AddCommand(awsSSOCmd)
+	awsSSOCmd.Flags().StringVar(&ssoRegion, "region", "us-east-1", "AWS SSO region")
+	awsSSOCmd.Flags().StringVar(&ssoStartURL, "start-url", "", "AWS SSO start URL")
+	if err := awsSSOCmd.MarkFlagRequired("start-url"); err != nil {
 		panic(err)
 	}
 }
 
-func awsSSOCommand(cmd *cobra.Command, args []string) {
-	fmt.Println("AWS sso")
-	ctx := context.Background()
-
-	if err := controllers.AWSSSOLogin(ctx, SSORegion, SSOStartURL, true); err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
+func runAWSSSO(cmd *cobra.Command, args []string) error {
+	return controllers.SSOLogin(cmd.Context(), ssoRegion, ssoStartURL, true)
 }
