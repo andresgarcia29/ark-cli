@@ -60,5 +60,7 @@ jobs:
       - name: Build snapshot
         uses: ./.github/actions/goreleaser-build
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          # A snapshot publishes nothing, so it needs no personal token; the
+          # built-in job token is enough and cannot expire.
+          github-token: ${{ github.token }}
           snapshot: 'true'
