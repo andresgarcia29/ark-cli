@@ -61,7 +61,7 @@ func Width() int {
 }
 
 func emit(format string, a ...any) {
-	fmt.Fprintln(styledErr, fmt.Sprintf(format, a...))
+	_, _ = fmt.Fprintln(styledErr, fmt.Sprintf(format, a...))
 }
 
 // prefixed writes a glyph-led line, indenting any wrapped continuation so
@@ -124,13 +124,13 @@ func Hint(format string, a ...any) {
 
 // Result prints command output meant for capture; it always goes to stdout.
 func Result(format string, a ...any) {
-	fmt.Fprintln(Out, fmt.Sprintf(format, a...))
+	_, _ = fmt.Fprintln(Out, fmt.Sprintf(format, a...))
 }
 
 // Blank separates sections.
 func Blank() {
 	if !quiet {
-		fmt.Fprintln(styledErr)
+		_, _ = fmt.Fprintln(styledErr)
 	}
 }
 

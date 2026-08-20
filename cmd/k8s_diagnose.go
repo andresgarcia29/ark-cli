@@ -86,7 +86,7 @@ func runKubernetesDiagnose(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return "", err
 				}
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				return "tcp/443 open", nil
 			},
 			fix: "check your network, VPN or proxy settings",

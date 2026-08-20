@@ -133,14 +133,14 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp file in %s: %w", dir, err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to set permissions: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

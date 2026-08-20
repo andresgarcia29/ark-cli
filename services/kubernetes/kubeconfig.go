@@ -174,14 +174,14 @@ func (c *Kubeconfig) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp kubeconfig: %w", err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to set kubeconfig permissions: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("failed to write kubeconfig: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

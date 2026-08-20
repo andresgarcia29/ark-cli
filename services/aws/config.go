@@ -10,10 +10,6 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// arkManagedKeys are the keys ark writes for an SSO profile. A profile whose
-// keys are all ark-managed is safe to replace; anything else is merged.
-var arkManagedKeys = []string{"sso_start_url", "sso_region", "sso_account_id", "sso_role_name", "region"}
-
 // WriteConfigFile merges the discovered SSO profiles into ~/.aws/config.
 // Profiles the user wrote by hand, including assume-role profiles that ark
 // itself resolves through source_profile, are preserved. The write is atomic.
