@@ -9,7 +9,9 @@ A powerful command-line interface for AWS and Kubernetes operations, designed to
 
 - **AWS Operations**: Login, SSO, and credential management
 - **Kubernetes Integration**: Seamless k8s operations
-- **Parallel Processing**: Accounts, regions and kubeconfig entries are resolved concurrently
+- **Parallel Processing**: Accounts and regions are scanned concurrently
+- **Native kubeconfig**: Entries are written directly by ark, not by spawning `aws eks update-kubeconfig` per cluster
+- **Throttle aware**: AWS rate limiting is retried with adaptive backoff and reported instead of looking like a hang
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Auto-Browser**: Automatically opens browser for AWS SSO authentication
 
@@ -64,6 +66,11 @@ Interactive cluster selector. Lists all clusters in your `kubeconfig` and lets y
 
 #### `ark k8s setup`
 Scans AWS accounts for EKS clusters and configures them in your `kubeconfig`.
+
+Cluster details are read once via `eks:DescribeCluster` during the scan and the
+kubeconfig is written in a single pass, so hundreds of clusters take seconds
+rather than minutes. Re-running updates entries in place. The AWS CLI is still
+needed at *connect* time, because kubectl calls `aws eks get-token`.
 - `--role-prefixes`: (Optional) Comma-separated list of role prefixes to search for (default: `readonly,read-only`).
 - `--role-arn`: (Optional) Specific static Role ARN to use. **Mutually exclusive with `--role-prefixes`**.
 - `--regions`: (Optional) List of AWS regions to scan (default: `us-west-2`).

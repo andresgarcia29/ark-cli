@@ -40,31 +40,59 @@ func (e *EKSClient) ListClusters(ctx context.Context) ([]string, error) {
 	return clusters, nil
 }
 
-// GetClustersForAccountRegion gets all clusters for a specific account and region
+// describeCluster fetches the endpoint and CA that a kubeconfig entry needs.
+func (e *EKSClient) describeCluster(ctx context.Context, name string) (*eks.DescribeClusterOutput, error) {
+	return e.client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: aws.String(name)})
+}
+
+// GetClustersForAccountRegion lists every cluster in one account and region,
+// including the details needed to write kubeconfig entries. The describe calls
+// share one client, so credentials are resolved once rather than per cluster.
 func GetClustersForAccountRegion(ctx context.Context, profile, accountID, region string) ([]EKSCluster, error) {
-	// Create EKS client
 	eksClient, err := NewEKSClient(ctx, region, profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create EKS client: %w", err)
 	}
 
-	// List clusters
-	clusterNames, err := eksClient.ListClusters(ctx)
+	names, err := eksClient.ListClusters(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Create EKSCluster objects
-	var clusters []EKSCluster
-	for _, name := range clusterNames {
-		clusters = append(clusters, EKSCluster{
-			Name:      name,
-			Region:    region,
-			AccountID: accountID,
-			Profile:   profile,
-		})
+	if len(names) == 0 {
+		return nil, nil
 	}
 
+	described, errs := lib.MapConcurrent(ctx, names, lib.DefaultLimits(),
+		func(ctx context.Context, name string) (EKSCluster, error) {
+			out, err := eksClient.describeCluster(ctx, name)
+			if err != nil {
+				return EKSCluster{}, err
+			}
+			cluster := EKSCluster{
+				Name:      name,
+				Region:    region,
+				AccountID: accountID,
+				Profile:   profile,
+				ARN:       aws.ToString(out.Cluster.Arn),
+				Endpoint:  aws.ToString(out.Cluster.Endpoint),
+			}
+			if out.Cluster.CertificateAuthority != nil {
+				cluster.CertificateAuthority = aws.ToString(out.Cluster.CertificateAuthority.Data)
+			}
+			return cluster, nil
+		})
+
+	logger := logs.GetLogger()
+	for _, err := range errs {
+		logger.Debugw("describe cluster failed", "region", region, "error", err)
+	}
+
+	clusters := make([]EKSCluster, 0, len(described))
+	for _, name := range names {
+		if c, ok := described[name]; ok {
+			clusters = append(clusters, c)
+		}
+	}
 	return clusters, nil
 }
 
@@ -137,8 +165,10 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefi
 	}
 	sort.Strings(accountIDs)
 
+	totalAccounts.Store(int64(len(accountIDs)))
 	byAccount, errs := lib.MapConcurrent(ctx, accountIDs, lib.DefaultLimits(),
 		func(ctx context.Context, accountID string) ([]EKSCluster, error) {
+			defer scannedAccounts.Add(1)
 			return processAccount(ctx, accountID, selectedProfiles[accountID], regions)
 		})
 

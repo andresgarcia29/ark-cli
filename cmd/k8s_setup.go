@@ -59,16 +59,26 @@ func runKubernetesSetup(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	services_aws.ResetThrottleCount()
+
 	var clusters []services_aws.EKSCluster
 	var scanErrs []error
 	err := animation.Spin(ctx, "Scanning AWS accounts for EKS clusters",
 		func(ctx context.Context, note animation.Progress) error {
+			done := reportScanProgress(ctx, note)
+			defer done()
+
 			var err error
 			clusters, scanErrs, err = services_aws.GetClustersFromAllAccounts(ctx, setupRegions, rolePrefixes, setupRoleARN)
 			return err
 		})
 	if err != nil {
 		return err
+	}
+
+	if n := services_aws.ThrottleCount(); n > 0 {
+		ui.Warn("AWS rate limited %d requests; ark backed off and retried them", n)
+		ui.Hint("scan fewer regions or accounts at once if this keeps happening")
 	}
 
 	for _, e := range scanErrs {
@@ -80,18 +90,12 @@ func runKubernetesSetup(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	var report controllers_k8s.ClusterReport
-	err = animation.Spin(ctx, "Writing kubeconfig entries",
-		func(ctx context.Context, note animation.Progress) error {
-			var err error
-			report, err = controllers_k8s.ConfigureClusters(ctx, clusters, setupKubeconfigPath, setupReplaceProfile, note)
-			return err
-		})
+	report, err := controllers_k8s.ConfigureClusters(ctx, clusters, setupKubeconfigPath, setupReplaceProfile)
 	if err != nil {
 		return err
 	}
 
-	for _, e := range report.Failed {
+	for _, e := range report.Skipped {
 		ui.Warn("%s", ui.Reason(e))
 	}
 
