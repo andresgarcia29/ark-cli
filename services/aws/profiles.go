@@ -2,7 +2,9 @@ package services_aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,87 +15,47 @@ import (
 	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// GetAllProfiles gets all available account+role combinations
-// OPTIMIZED VERSION: Parallelizes role retrieval for multiple accounts
-func (s *SSOClient) GetAllProfiles(ctx context.Context, accessToken string) ([]AWSProfile, error) {
-	logger := logs.GetLogger()
+// credentialSkew is how much life credentials must have left to be reused
+// without refreshing.
+const credentialSkew = 10 * time.Minute
 
-	// Step 1: Get all accounts (this must be sequential)
-	logger.Info("Getting account list")
+// errSSOSessionExpired is the routine "your browser session lapsed" case, which
+// the retry path turns into a fresh SSO login rather than a hard failure.
+var errSSOSessionExpired = errors.New("SSO session expired")
+
+// SSOSessionExpired reports whether err means the cached SSO token is gone.
+func SSOSessionExpired(err error) bool { return errors.Is(err, errSSOSessionExpired) }
+
+// GetAllProfiles returns every account+role combination the token can reach,
+// fetching each account's roles concurrently.
+func (s *SSOClient) GetAllProfiles(ctx context.Context, accessToken string) ([]AWSProfile, error) {
 	accounts, err := s.ListAccounts(ctx, accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("error getting accounts: %w", err)
 	}
 
-	logger.Infow("Accounts found, getting roles in parallel",
-		"total_accounts", len(accounts))
+	accountIDs := make([]string, 0, len(accounts))
+	byID := make(map[string]Account, len(accounts))
+	for _, a := range accounts {
+		accountIDs = append(accountIDs, a.AccountID)
+		byID[a.AccountID] = a
+	}
+	sort.Strings(accountIDs)
 
-	// Configuration for parallel operations
-	config := lib.ConservativeConfig()
-
-	// Step 2: Use generic function to process accounts in parallel
-	// This function will execute ListAccountRoles for each account simultaneously
-	accountRoles, errors := lib.ProcessAccountsInParallel(
-		ctx,
-		// Convert the account list to a list of IDs
-		func() []string {
-			var accountIDs []string
-			for _, account := range accounts {
-				accountIDs = append(accountIDs, account.AccountID)
-			}
-			return accountIDs
-		}(),
-		config,
-		// This function executes for each account in parallel
+	roles, errs := lib.MapConcurrent(ctx, accountIDs, lib.DefaultLimits(),
 		func(ctx context.Context, accountID string) ([]Role, error) {
-			logger.Debugf("Getting roles for account: %s", accountID)
+			return s.ListAccountRoles(ctx, accessToken, accountID)
+		})
 
-			// This is where we make the actual call to the AWS SSO API
-			// This function can take several seconds, that's why we parallelize it
-			roles, err := s.ListAccountRoles(ctx, accessToken, accountID)
-			if err != nil {
-				return nil, fmt.Errorf("error getting roles for account %s: %w", accountID, err)
-			}
-
-			logger.Infow("Roles obtained for account",
-				"account_id", accountID,
-				"roles_count", len(roles))
-			return roles, nil
-		},
-	)
-
-	// If there were errors in some accounts, we report them but continue
-	if len(errors) > 0 {
-		logger.Warnw("Some accounts had errors",
-			"error_count", len(errors))
-		for _, err := range errors {
-			logger.Warnf("  - %v", err)
-		}
+	logger := logs.GetLogger()
+	for _, err := range errs {
+		logger.Debugw("listing roles failed", "error", err)
 	}
 
-	// Step 3: Convert results to profiles
-	// We need to combine account information with obtained roles
 	var profiles []AWSProfile
-
-	// Create a map for fast account information lookup
-	accountMap := make(map[string]Account)
-	for _, account := range accounts {
-		accountMap[account.AccountID] = account
-	}
-
-	// For each account that was processed successfully
-	for accountID, roles := range accountRoles {
-		// Search for complete account information
-		account, found := accountMap[accountID]
-		if !found {
-			// This shouldn't happen, but we handle it for safety
-			logger.Warnw("Complete information not found for account",
-				"account_id", accountID)
-			continue
-		}
-
-		// Create a profile for each account+role combination
-		for _, role := range roles {
+	for _, accountID := range accountIDs {
+		account := byID[accountID]
+		for _, role := range roles[accountID] {
 			profiles = append(profiles, AWSProfile{
 				AccountID:    account.AccountID,
 				AccountName:  account.AccountName,
@@ -103,8 +65,9 @@ func (s *SSOClient) GetAllProfiles(ctx context.Context, accessToken string) ([]A
 		}
 	}
 
-	logger.Infow("Profiles created successfully",
-		"total_profiles", len(profiles))
+	if len(profiles) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("could not list roles for any account: %w", errors.Join(errs...))
+	}
 	return profiles, nil
 }
 
@@ -112,27 +75,26 @@ func (s *SSOClient) GetAllProfiles(ctx context.Context, accessToken string) ([]A
 func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool) error {
 	logger := logs.GetLogger()
 
-	// Step 1: Read profile configuration
-	profileConfig, err := ReadProfileFromConfig(profileName)
-	if err != nil {
-		return fmt.Errorf("failed to read profile config: %w", err)
+	// Skip the round trip when the file already holds credentials that will
+	// outlive the work about to be done with them.
+	if CachedCredentialsValid(profileName, credentialSkew) && !setAsDefault {
+		logger.Debugw("reusing cached credentials", "profile", profileName)
+		return nil
 	}
 
-	logger.Infow("Profile configuration loaded",
-		"profile_name", profileName,
-		"profile_type", profileConfig.ProfileType)
+	profileConfig, err := ReadProfileFromConfig(profileName)
+	if err != nil {
+		return lib.Permanent(err)
+	}
 
 	var creds *Credentials
 
 	// Step 2: Handle different profile types
 	switch profileConfig.ProfileType {
 	case ProfileTypeSSO:
-		logger.Info("Processing SSO profile")
-
-		// Read token from cache
 		cachedToken, err := ReadTokenFromCache(profileConfig.StartURL)
 		if err != nil {
-			return fmt.Errorf("failed to read token from cache (you may need to run login first): %w", err)
+			return lib.Permanent(errSSOSessionExpired)
 		}
 
 		// Create SSO client
@@ -148,14 +110,11 @@ func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool
 		}
 
 	case ProfileTypeAssumeRole:
-		logger.Info("Processing assume role profile")
-
-		// Validate required fields for assume role
 		if profileConfig.RoleARN == "" {
-			return fmt.Errorf("role_arn is required for assume role profile")
+			return lib.Permanent(fmt.Errorf("profile %s is missing role_arn", profileName))
 		}
 		if profileConfig.SourceProfile == "" {
-			return fmt.Errorf("source_profile is required for assume role profile")
+			return lib.Permanent(fmt.Errorf("profile %s is missing source_profile", profileName))
 		}
 
 		// Assume the role
@@ -165,7 +124,7 @@ func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool
 		}
 
 	default:
-		return fmt.Errorf("unsupported profile type: %s", profileConfig.ProfileType)
+		return lib.Permanent(fmt.Errorf("unsupported profile type: %s", profileConfig.ProfileType))
 	}
 
 	// Step 3: Write credentials to file
@@ -173,10 +132,7 @@ func LoginWithProfile(ctx context.Context, profileName string, setAsDefault bool
 		return fmt.Errorf("failed to write credentials: %w", err)
 	}
 
-	logger.Infow("Login successful",
-		"profile_name", profileName,
-		"profile_type", profileConfig.ProfileType)
-
+	logger.Debugw("login successful", "profile", profileName, "type", profileConfig.ProfileType)
 	return nil
 }
 

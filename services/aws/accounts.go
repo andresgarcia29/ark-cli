@@ -29,7 +29,6 @@ func (s *SSOClient) ListAccounts(ctx context.Context, accessToken string) ([]Acc
 
 		output, err := s.ssoClient.ListAccounts(ctx, input)
 		if err != nil {
-			logger.Errorw("Failed to list accounts", "page", pageCount, "error", err)
 			return nil, fmt.Errorf("failed to list accounts: %w", err)
 		}
 
@@ -43,7 +42,6 @@ func (s *SSOClient) ListAccounts(ctx context.Context, accessToken string) ([]Acc
 				EmailAddress: aws.ToString(acc.EmailAddress),
 			}
 			accounts = append(accounts, account)
-			logger.Debugw("Account added", "account_id", account.AccountID, "account_name", account.AccountName)
 		}
 
 		// If there are no more pages, terminate

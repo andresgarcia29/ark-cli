@@ -1,111 +1,99 @@
 package animation
 
 import (
+	"context"
 	"fmt"
-	"time"
 
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-// SpinnerModel represents the spinner model
-type SpinnerModel struct {
-	spinner  spinner.Model
-	message  string
-	quitting bool
-	done     bool
+type spinnerModel struct {
+	spinner spinner.Model
+	message string
+	note    string
 }
 
-// NewSpinnerModel creates a new spinner model
-func NewSpinnerModel(message string) SpinnerModel {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	return SpinnerModel{
-		spinner: s,
-		message: message,
-	}
-}
+// noteMsg replaces the line under the spinner with fresh progress detail.
+type noteMsg string
 
-// Init implements tea.Model
-func (m SpinnerModel) Init() tea.Cmd {
-	return m.spinner.Tick
-}
+// finishedMsg ends the spinner once the work returns.
+type finishedMsg struct{}
 
-// Update implements tea.Model
-func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m spinnerModel) Init() tea.Cmd { return m.spinner.Tick }
+
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case finishedMsg:
+		return m, tea.Quit
+	case noteMsg:
+		m.note = string(msg)
+		return m, nil
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			m.quitting = true
+		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 		return m, nil
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
-
-	case doneMsg:
-		m.done = true
-		return m, tea.Quit
-
-	case tea.QuitMsg:
-		m.quitting = true
-		return m, nil
-
-	default:
-		return m, nil
 	}
+	return m, nil
 }
 
-// View implements tea.Model
-func (m SpinnerModel) View() string {
-	if m.done {
-		checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
-		return checkStyle.Render(fmt.Sprintf("✓ %s\n", m.message))
+func (m spinnerModel) View() string {
+	out := m.spinner.View() + " " + m.message
+	if m.note != "" {
+		out += "\n  " + ui.Muted.Render(m.note)
 	}
-
-	if m.quitting {
-		return ""
-	}
-
-	messageStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	return fmt.Sprintf("%s %s\n", m.spinner.View(), messageStyle.Render(m.message))
+	return out + "\n"
 }
 
-// doneMsg is a message to indicate that the spinner should terminate
-type doneMsg struct{}
+// Progress reports incremental detail from inside a spinner.
+type Progress func(format string, a ...any)
 
-// Done returns a command that sends a completion message
-func Done() tea.Msg {
-	return doneMsg{}
-}
+// Spin runs work while showing a spinner, cancelling it if the user hits
+// ctrl+c. When stderr is not a terminal it prints one line and runs work
+// directly, so logs and CI output stay clean.
+func Spin(ctx context.Context, message string, work func(context.Context, Progress) error) error {
+	if !ui.Interactive() {
+		ui.Step("%s", message)
+		return work(ctx, func(string, ...any) {})
+	}
 
-// ShowSpinner shows a spinner while executing a function
-func ShowSpinner(message string, fn func() error) error {
-	p := tea.NewProgram(NewSpinnerModel(message))
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = ui.Accent
 
-	// Channel to handle the function result
-	errChan := make(chan error, 1)
+	p := tea.NewProgram(
+		spinnerModel{spinner: s, message: message},
+		tea.WithOutput(ui.Err),
+		tea.WithContext(ctx),
+	)
 
-	// Execute the function in a goroutine
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 1)
 	go func() {
-		err := fn()
-		errChan <- err
-		// Send completion message to the program
-		time.Sleep(100 * time.Millisecond) // Small pause for the spinner to be visible
-		p.Send(Done())
+		errCh <- work(ctx, func(format string, a ...any) {
+			p.Send(noteMsg(fmt.Sprintf(format, a...)))
+		})
+		p.Send(finishedMsg{})
 	}()
 
-	// Run the program (this will block until it finishes)
 	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("error running spinner: %w", err)
+		// The UI stopped, most likely ctrl+c. Cancel the work and report it.
+		cancel()
+		<-errCh
+		return fmt.Errorf("cancelled: %w", err)
 	}
 
-	// Get the function result
-	return <-errChan
+	if err := <-errCh; err != nil {
+		return err
+	}
+	ui.Done("%s", message)
+	return nil
 }

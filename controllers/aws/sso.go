@@ -3,90 +3,80 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strings"
+	"time"
 
 	"github.com/andresgarcia29/ark-cli/lib"
+	"github.com/andresgarcia29/ark-cli/lib/animation"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
 )
 
-func AWSSSOLogin(ctx context.Context, SSORegion string, SSOStartURL string, boostraping bool) error {
-	// Step 1: Create SSO client
-	client, err := services_aws.NewSSOClient(ctx, SSORegion, SSOStartURL)
+// SSOLogin runs the device authorization flow. When bootstrap is set it also
+// writes every reachable account+role into ~/.aws/config.
+func SSOLogin(ctx context.Context, ssoRegion, ssoStartURL string, bootstrap bool) error {
+	client, err := services_aws.NewSSOClient(ctx, ssoRegion, ssoStartURL)
 	if err != nil {
-		fmt.Println("Error creating SSO client:", err)
-		return err
+		return fmt.Errorf("could not reach AWS SSO in %s: %w", ssoRegion, err)
 	}
-	fmt.Printf("SSO client created successfully for region: %s, start URL: %s\n", client.Region, client.StartURL)
 
-	// Step 2: Register client
-	fmt.Println("\nRegistering client...")
 	registration, err := client.RegisterClient(ctx)
 	if err != nil {
-		fmt.Println("Error registering client:", err)
-		return err
+		return fmt.Errorf("could not register with AWS SSO: %w", err)
 	}
-	fmt.Println("Client registered successfully")
 
-	// Step 3: Start device authorization
-	fmt.Println("\nStarting device authorization...")
 	deviceAuth, err := client.StartDeviceAuthorization(ctx, registration.ClientID, registration.ClientSecret)
 	if err != nil {
-		fmt.Println("Error starting device authorization:", err)
-		return err
+		return fmt.Errorf("could not start the browser sign-in: %w", err)
 	}
 
-	// Step 4: Show instructions to the user
-	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("Please authorize this application:")
-	fmt.Printf("Visit: %s\n", deviceAuth.VerificationURIComplete)
-	fmt.Printf("Or go to: %s and enter code: %s\n", deviceAuth.VerificationURI, deviceAuth.UserCode)
-	fmt.Println(strings.Repeat("=", 60))
+	ui.Panel("Approve this sign-in",
+		ui.Muted.Render("code ")+ui.Strong.Render(deviceAuth.UserCode),
+		ui.Muted.Render(deviceAuth.VerificationURI),
+	)
 
-	// Open browser automatically
-	fmt.Println("\nOpening browser for authorization...")
 	if err := lib.OpenBrowser(deviceAuth.VerificationURIComplete); err != nil {
-		fmt.Printf("Warning: Failed to open browser automatically: %v\n", err)
-		fmt.Println("Please open the URL manually.")
+		ui.Warn("Could not open your browser automatically")
+		ui.Detail("Open %s", deviceAuth.VerificationURIComplete)
 	}
 
-	fmt.Println("\nWaiting for authorization...")
+	// The device code has its own lifetime; stop polling when it lapses.
+	authCtx, cancel := context.WithTimeout(ctx, time.Duration(deviceAuth.ExpiresIn)*time.Second)
+	defer cancel()
 
-	// Step 5: Polling to get the token
-	token, err := client.CreateToken(ctx, registration.ClientID, registration.ClientSecret, deviceAuth.DeviceCode, deviceAuth.Interval)
+	var token *services_aws.TokenResponse
+	err = animation.Spin(authCtx, "Waiting for approval in your browser",
+		func(ctx context.Context, _ animation.Progress) error {
+			var err error
+			token, err = client.CreateToken(ctx, registration.ClientID, registration.ClientSecret, deviceAuth.DeviceCode, deviceAuth.Interval)
+			return err
+		})
 	if err != nil {
-		fmt.Println("Error creating token:", err)
 		return err
 	}
-	fmt.Println("\n✓ Authorization successful!")
 
-	// Step 6: Save token to cache
-	fmt.Println("Saving token to cache...")
 	if err := client.SaveTokenToCache(token); err != nil {
-		fmt.Println("Error saving token:", err)
+		return fmt.Errorf("signed in but could not cache the session: %w", err)
+	}
+
+	if !bootstrap {
+		return nil
+	}
+
+	var profiles []services_aws.AWSProfile
+	err = animation.Spin(ctx, "Discovering accounts and roles",
+		func(ctx context.Context, _ animation.Progress) error {
+			var err error
+			profiles, err = client.GetAllProfiles(ctx, token.AccessToken)
+			return err
+		})
+	if err != nil {
 		return err
 	}
-	fmt.Println("✓ Token saved successfully")
 
-	if boostraping {
-		// Step 7: Get all accounts and roles
-		fmt.Println("\nFetching accounts and roles...")
-		profiles, err := client.GetAllProfiles(ctx, token.AccessToken)
-		if err != nil {
-			fmt.Println("Error getting profiles:", err)
-			return err
-		}
-		fmt.Printf("✓ Found %d profiles\n", len(profiles))
-
-		// Step 8: Write config file
-		fmt.Println("\nWriting profiles to ~/.aws/config...")
-		if err := client.WriteConfigFile(profiles); err != nil {
-			fmt.Println("Error writing config file:", err)
-			return err
-		}
-		fmt.Println("✓ Config file updated successfully")
+	if err := client.WriteConfigFile(profiles); err != nil {
+		return err
 	}
 
-	fmt.Println("\n🎉 AWS SSO sso completed!")
-
+	ui.Done("Wrote %d profiles to ~/.aws/config", len(profiles))
 	return nil
 }

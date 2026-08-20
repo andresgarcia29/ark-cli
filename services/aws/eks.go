@@ -2,7 +2,9 @@ package services_aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/andresgarcia29/ark-cli/lib"
 	"github.com/andresgarcia29/ark-cli/logs"
@@ -66,50 +68,38 @@ func GetClustersForAccountRegion(ctx context.Context, profile, accountID, region
 	return clusters, nil
 }
 
-// GetClustersForAccountMultiRegion gets all clusters for an account in multiple regions
-// OPTIMIZED VERSION: Parallelizes the search across multiple regions simultaneously
+// GetClustersForAccountMultiRegion lists clusters for one account across
+// regions, scanning the regions concurrently.
 func GetClustersForAccountMultiRegion(ctx context.Context, profile, accountID string, regions []string) ([]EKSCluster, error) {
-	logger := logs.GetLogger()
-
-	// If there are no regions, return empty list
-	if len(regions) == 0 {
-		return []EKSCluster{}, nil
-	}
-
-	// If there's only one region, we don't need parallelization
-	if len(regions) == 1 {
+	switch len(regions) {
+	case 0:
+		return nil, nil
+	case 1:
 		return GetClustersForAccountRegion(ctx, profile, accountID, regions[0])
 	}
 
-	logger.Infow("Scanning regions in parallel",
-		"total_regions", len(regions),
-		"account_id", accountID)
+	byRegion, errs := lib.MapConcurrent(ctx, regions, lib.DefaultLimits(),
+		func(ctx context.Context, region string) ([]EKSCluster, error) {
+			return GetClustersForAccountRegion(ctx, profile, accountID, region)
+		})
 
-	// Configuration for parallelization
-	config := lib.ConservativeConfig()
-
-	// Use our specialized function to process regions in parallel
-	// This function automatically handles:
-	// - Concurrency control (maximum 10 simultaneous regions)
-	// - Timeouts to prevent hangs
-	// - Result collection from channels
-	// - Partial error handling
-	allClusters, err := ProcessRegionsInParallel(ctx, profile, accountID, regions, config)
-	if err != nil {
-		return nil, fmt.Errorf("error processing regions for account %s: %w", accountID, err)
+	var clusters []EKSCluster
+	for _, region := range regions {
+		clusters = append(clusters, byRegion[region]...)
 	}
 
-	logger.Infow("Clusters found in multiple regions",
-		"account_id", accountID,
-		"total_clusters", len(allClusters),
-		"regions_scanned", len(regions))
-
-	return allClusters, nil
+	if len(clusters) == 0 && len(errs) == len(regions) {
+		return nil, fmt.Errorf("every region failed for account %s: %w", accountID, errors.Join(errs...))
+	}
+	for _, err := range errs {
+		logs.GetLogger().Debugw("region scan failed", "account_id", accountID, "error", err)
+	}
+	return clusters, nil
 }
 
 // GetClustersFromAllAccounts gets clusters from all accounts in the specified regions
 // OPTIMIZED VERSION: Parallelizes the processing of multiple AWS accounts
-func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefixs []string, roleARN string) ([]EKSCluster, error) {
+func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefixs []string, roleARN string) ([]EKSCluster, []error, error) {
 	logger := logs.GetLogger()
 
 	// If no regions are specified, use default
@@ -121,7 +111,7 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefi
 	logger.Info("Reading profiles from ~/.aws/config")
 	allProfiles, err := ReadAllProfilesFromConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read profiles: %w", err)
+		return nil, nil, fmt.Errorf("failed to read profiles: %w", err)
 	}
 
 	// Step 2: Select profiles based on prefix or specific ARN
@@ -138,74 +128,33 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefi
 
 	if len(selectedProfiles) == 0 {
 		logger.Warn("No accounts found to process")
-		return []EKSCluster{}, nil
+		return nil, nil, nil
 	}
 
-	// If there's only one account, we don't need parallelization
-	if len(selectedProfiles) == 1 {
-		for accountID, profile := range selectedProfiles {
-			return processAccount(ctx, accountID, profile, regions)
-		}
-	}
-
-	// Configuration for parallelization
-	config := lib.ConservativeConfig()
-
-	// Convert the profile map to a list of account IDs
-	var accountIDs []string
-	profileMap := make(map[string]ProfileConfig)
-	for accountID, profile := range selectedProfiles {
+	accountIDs := make([]string, 0, len(selectedProfiles))
+	for accountID := range selectedProfiles {
 		accountIDs = append(accountIDs, accountID)
-		profileMap[accountID] = profile
 	}
+	sort.Strings(accountIDs)
 
-	logger.Infow("Processing accounts in parallel",
-		"total_accounts", len(accountIDs),
-		"max_workers", config.MaxWorkers)
-
-	// Step 3: Use parallelization to process all accounts
-	// This function will execute login and cluster retrieval for each account simultaneously
-	accountResults, errors := lib.ProcessAccountsInParallel(
-		ctx,
-		accountIDs,
-		config,
-		// This function executes for each account in parallel
+	byAccount, errs := lib.MapConcurrent(ctx, accountIDs, lib.DefaultLimits(),
 		func(ctx context.Context, accountID string) ([]EKSCluster, error) {
-			// Get the profile information for this account
-			profile, exists := profileMap[accountID]
-			if !exists {
-				return nil, fmt.Errorf("profile not found for account %s", accountID)
-			}
+			return processAccount(ctx, accountID, selectedProfiles[accountID], regions)
+		})
 
-			// Process this account (login + get clusters)
-			return processAccount(ctx, accountID, profile, regions)
-		},
-	)
-
-	// Report errors but continue with successful results
-	if len(errors) > 0 {
-		logger.Warnw("Some accounts had errors",
-			"error_count", len(errors))
-		for _, err := range errors {
-			logger.Warnf("  - %v", err)
-		}
-	}
-
-	// Combine all clusters from all successful accounts
 	var allClusters []EKSCluster
-	for accountID, clusters := range accountResults {
-		allClusters = append(allClusters, clusters...)
-		logger.Infow("Account contributed clusters",
-			"account_id", accountID,
-			"clusters_count", len(clusters))
+	for _, accountID := range accountIDs {
+		allClusters = append(allClusters, byAccount[accountID]...)
 	}
 
-	logger.Infow("Parallel processing completed",
-		"total_clusters", len(allClusters),
-		"successful_accounts", len(accountResults),
-		"failed_accounts", len(errors))
+	for _, err := range errs {
+		logger.Debugw("account scan failed", "error", err)
+	}
+	if len(allClusters) == 0 && len(errs) == len(accountIDs) {
+		return nil, errs, fmt.Errorf("every account failed: %w", errors.Join(errs...))
+	}
 
-	return allClusters, nil
+	return allClusters, errs, nil
 }
 
 // processAccount processes a specific account: logs in and gets all clusters

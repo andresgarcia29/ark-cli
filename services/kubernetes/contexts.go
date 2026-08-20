@@ -2,14 +2,13 @@ package services_kubernetes
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
-
-	"github.com/andresgarcia29/ark-cli/logs"
 )
 
-// ClusterContext represents a Kubernetes cluster context
+// ClusterContext is one entry in the user's kubeconfig.
 type ClusterContext struct {
 	Name        string
 	Current     bool
@@ -18,197 +17,97 @@ type ClusterContext struct {
 	ClusterName string
 }
 
-// GetClusterContexts retrieves all available cluster contexts from kubectl
-func GetClusterContexts() ([]ClusterContext, error) {
-	logger := logs.GetLogger()
-	logger.Debug("Starting to retrieve cluster contexts from kubectl")
+// kubectl runs a kubectl subcommand and returns its stdout.
+func kubectl(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
 
-	// Get all context names
-	cmd := exec.Command("kubectl", "config", "get-contexts", "-o", "name")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	logger.Debug("Executing kubectl config get-contexts command")
 	if err := cmd.Run(); err != nil {
-		logger.Errorw("Failed to get cluster contexts", "error", err, "stderr", stderr.String())
-		return nil, fmt.Errorf("failed to get cluster contexts: %w\nStderr: %s", err, stderr.String())
-	}
-
-	contextNames := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	logger.Debugw("Retrieved context names", "count", len(contextNames), "contexts", contextNames)
-
-	if len(contextNames) == 1 && contextNames[0] == "" {
-		logger.Info("No cluster contexts found")
-		return []ClusterContext{}, nil
-	}
-
-	// Get current context
-	logger.Debug("Getting current context")
-	currentContext, err := getCurrentContext()
-	if err != nil {
-		logger.Warnw("Failed to get current context, continuing without marking any as current", "error", err)
-		// If we can't get current context, continue without marking any as current
-		currentContext = ""
-	} else {
-		logger.Debugw("Current context retrieved", "context", currentContext)
-	}
-
-	contexts := make([]ClusterContext, 0, len(contextNames))
-	for _, name := range contextNames {
-		if name != "" {
-			logger.Debugw("Processing context", "name", name)
-			// Get detailed context information including profile
-			// profile, region, clusterName, err := getContextDetails(name)
-			// if err != nil {
-			// 	logger.Warnw("Failed to get context details, using empty values", "context", name, "error", err)
-			// 	// If we can't get context details, continue with empty values
-			// 	profile = ""
-			// 	region = ""
-			// 	clusterName = ""
-			// } else {
-			// 	logger.Debugw("Context details retrieved", "context", name, "profile", profile, "region", region, "cluster", clusterName)
-			// }
-
-			context := ClusterContext{
-				Name:    name,
-				Current: name == currentContext,
-				// Profile:     profile,
-				// Region:      region,
-				// ClusterName: clusterName,
-			}
-			contexts = append(contexts, context)
-			logger.Debugw("Context added to results", "context", context)
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
 		}
+		if i := strings.IndexByte(detail, '\n'); i >= 0 {
+			detail = detail[:i]
+		}
+		return "", fmt.Errorf("kubectl %s: %s", args[0], detail)
+	}
+	return stdout.String(), nil
+}
+
+// GetClusterContexts lists the contexts in the kubeconfig, marking the active one.
+func GetClusterContexts(ctx context.Context) ([]ClusterContext, error) {
+	out, err := kubectl(ctx, "config", "get-contexts", "-o", "name")
+	if err != nil {
+		return nil, err
 	}
 
-	logger.Infow("Successfully retrieved cluster contexts", "count", len(contexts))
+	current, err := kubectl(ctx, "config", "current-context")
+	if err != nil {
+		// A kubeconfig with no active context is valid; nothing is marked.
+		current = ""
+	}
+	current = strings.TrimSpace(current)
+
+	var contexts []ClusterContext
+	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		contexts = append(contexts, ClusterContext{Name: name, Current: name == current})
+	}
 	return contexts, nil
 }
 
-// getCurrentContext gets the currently active context
-func getCurrentContext() (string, error) {
-	logger := logs.GetLogger()
-	logger.Debug("Executing kubectl config current-context command")
-
-	cmd := exec.Command("kubectl", "config", "current-context")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		logger.Errorw("Failed to get current context", "error", err, "stderr", stderr.String())
-		return "", fmt.Errorf("failed to get current context: %w\nStderr: %s", err, stderr.String())
+// GetKubernetesContextDetails reports the AWS profile, region and cluster name
+// backing a context, reading them from the exec credential plugin kubectl
+// stores for EKS. Missing values come back empty rather than as an error.
+func GetKubernetesContextDetails(ctx context.Context, contextName string) (profile, region, clusterName string, err error) {
+	user, err := kubectl(ctx, "config", "view", "-o",
+		fmt.Sprintf("jsonpath={.contexts[?(@.name==%q)].context.user}", contextName))
+	if err != nil {
+		return "", "", "", err
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		return "", "", "", nil
 	}
 
-	currentContext := strings.TrimSpace(stdout.String())
-	logger.Debugw("Current context retrieved", "context", currentContext)
-	return currentContext, nil
-}
+	profile, _ = kubectlValue(ctx, fmt.Sprintf(
+		"jsonpath={.users[?(@.name==%q)].user.exec.env[?(@.name=='AWS_PROFILE')].value}", user))
+	args, _ := kubectlValue(ctx, fmt.Sprintf(
+		"jsonpath={.users[?(@.name==%q)].user.exec.args}", user))
 
-// getContextDetails extracts profile, region, and cluster name from a specific context
-func GetKubernetesContextDetails(contextName string) (profile, region, clusterName string, err error) {
-	logger := logs.GetLogger()
-	logger.Debugw("Getting context details", "context", contextName)
-
-	// Get the full context configuration
-	cmd := exec.Command("kubectl", "config", "view", "--context", contextName, "--minify", "--flatten")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	logger.Debugw("Executing kubectl config view command", "context", contextName)
-	if err := cmd.Run(); err != nil {
-		logger.Errorw("Failed to get context details", "context", contextName, "error", err, "stderr", stderr.String())
-		return "", "", "", fmt.Errorf("failed to get context details: %w\nStderr: %s", err, stderr.String())
-	}
-
-	config := stdout.String()
-	lines := strings.Split(config, "\n")
-	logger.Debugw("Parsing context configuration", "context", contextName, "lines", len(lines))
-
-	// Parse the configuration to extract profile, region, and cluster name
-	inArgs := false
-	inEnv := false
-
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Track if we're in the args or env section
-		if strings.Contains(line, "args:") {
-			inArgs = true
-			inEnv = false
-			continue
-		}
-		if strings.Contains(line, "env:") {
-			inArgs = false
-			inEnv = true
-			continue
-		}
-		if strings.Contains(line, ":") && !strings.Contains(line, "- ") {
-			// We've moved to a different section
-			inArgs = false
-			inEnv = false
-		}
-
-		// Extract AWS_PROFILE from env section
-		if inEnv && strings.Contains(line, "AWS_PROFILE") {
-			logger.Debugw("Found AWS_PROFILE in env section", "context", contextName, "line", line)
-			// Look for the value in the next line
-			if i+1 < len(lines) {
-				nextLine := strings.TrimSpace(lines[i+1])
-				if strings.Contains(nextLine, "value:") {
-					parts := strings.Split(nextLine, "value:")
-					if len(parts) == 2 {
-						profile = strings.TrimSpace(parts[1])
-						logger.Debugw("Extracted AWS profile", "context", contextName, "profile", profile)
-					}
-				}
-			}
-		}
-
-		// Extract region and cluster name from args section
-		if inArgs {
-			// Look for --region followed by the region value
-			if strings.Contains(line, "--region") && i+1 < len(lines) {
-				nextLine := strings.TrimSpace(lines[i+1])
-				if !strings.HasPrefix(nextLine, "-") {
-					region = nextLine
-					logger.Debugw("Extracted region", "context", contextName, "region", region)
-				}
-			}
-
-			// Look for --cluster-name followed by the cluster name
-			if strings.Contains(line, "--cluster-name") && i+1 < len(lines) {
-				nextLine := strings.TrimSpace(lines[i+1])
-				if !strings.HasPrefix(nextLine, "-") {
-					clusterName = nextLine
-					logger.Debugw("Extracted cluster name", "context", contextName, "cluster", clusterName)
-				}
-			}
-		}
-	}
-
-	logger.Debugw("Context details parsing completed", "context", contextName, "profile", profile, "region", region, "cluster", clusterName)
+	region = flagValue(args, "--region")
+	clusterName = flagValue(args, "--cluster-name")
 	return profile, region, clusterName, nil
 }
 
-// SwitchToContext switches to the specified cluster context
-func SwitchToContext(contextName string) error {
-	logger := logs.GetLogger()
-	logger.Infow("Switching to cluster context", "context", contextName)
+func kubectlValue(ctx context.Context, format string) (string, error) {
+	out, err := kubectl(ctx, "config", "view", "-o", format)
+	return strings.TrimSpace(out), err
+}
 
-	cmd := exec.Command("kubectl", "config", "use-context", contextName)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	logger.Debugw("Executing kubectl config use-context command", "context", contextName)
-	if err := cmd.Run(); err != nil {
-		logger.Errorw("Failed to switch to context", "context", contextName, "error", err, "stderr", stderr.String())
-		return fmt.Errorf("failed to switch to context %s: %w\nStderr: %s", contextName, err, stderr.String())
+// flagValue pulls the argument following flag out of kubectl's JSON array
+// rendering of the exec plugin args, e.g. ["eks","get-token","--region","us-west-2"].
+func flagValue(args, flag string) string {
+	fields := strings.FieldsFunc(args, func(r rune) bool {
+		return r == '[' || r == ']' || r == ',' || r == '"' || r == ' '
+	})
+	for i, f := range fields {
+		if f == flag && i+1 < len(fields) {
+			return fields[i+1]
+		}
 	}
+	return ""
+}
 
-	logger.Infow("Successfully switched to context", "context", contextName)
-	return nil
+// SwitchToContext makes contextName the active kubectl context.
+func SwitchToContext(ctx context.Context, contextName string) error {
+	_, err := kubectl(ctx, "config", "use-context", contextName)
+	return err
 }

@@ -2,149 +2,68 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	controllers "github.com/andresgarcia29/ark-cli/controllers/aws"
 	"github.com/andresgarcia29/ark-cli/lib/animation"
-	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
+	"github.com/andresgarcia29/ark-cli/lib/ui"
 	services_kubernetes "github.com/andresgarcia29/ark-cli/services/kubernetes"
 	"github.com/spf13/cobra"
 )
 
-var (
-	kubernetesCmd = &cobra.Command{
-		Use:     "kubernetes",
-		Aliases: []string{"k8s", "eks"},
-		Short:   "Kubernetes cluster operations",
-		Long:    `Kubernetes cluster operations - List and switch between cluster contexts`,
-		Run:     kubernetes,
-	}
-)
+var kubernetesCmd = &cobra.Command{
+	Use:     "kubernetes",
+	Aliases: []string{"k8s", "eks"},
+	Short:   "Kubernetes cluster access",
+	Long:    "Switch between the EKS clusters in your kubeconfig, refreshing AWS credentials as needed.",
+	RunE:    runKubernetes,
+}
 
 func init() {
 	rootCmd.AddCommand(kubernetesCmd)
 }
 
-func kubernetes(cmd *cobra.Command, args []string) {
-	ctx := context.Background()
-
-	// Add timeout to prevent hanging
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func runKubernetes(cmd *cobra.Command, args []string) error {
+	// Only the kubectl calls get a deadline. The picker waits on a human and
+	// must never time out.
+	loadCtx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 	defer cancel()
 
-	// Show interactive cluster selector with timeout
-	fmt.Println("🔍 Loading cluster contexts...")
-	selectedCluster, err := interactiveClusterSelectorWithTimeout(timeoutCtx)
+	clusters, err := services_kubernetes.GetClusterContexts(loadCtx)
 	if err != nil {
-		if timeoutCtx.Err() == context.DeadlineExceeded {
-			fmt.Printf("❌ Timeout: Cluster selector took too long to respond\n")
-			fmt.Println("💡 This might be due to:")
-			fmt.Println("   - Network connectivity issues")
-			fmt.Println("   - kubectl configuration problems")
-			fmt.Println("   - AWS credentials issues")
-			fmt.Println("   - Try running with --debug flag for more details")
-		} else {
-			fmt.Printf("❌ Error selecting cluster: %v\n", err)
-		}
-		return
+		return err
+	}
+	if len(clusters) == 0 {
+		ui.Fail("No clusters in your kubeconfig")
+		ui.Hint("ark k8s setup")
+		return errQuiet
 	}
 
-	// Show selected cluster information
-	fmt.Printf("\n✅ Selected cluster: %s", selectedCluster.Name)
-	if selectedCluster.Current {
-		fmt.Printf(" (currently active)")
-	}
-	fmt.Println()
-
-	profile, region, clusterName, err := services_kubernetes.GetKubernetesContextDetails(selectedCluster.Name)
+	cluster, err := animation.SelectCluster(clusters)
 	if err != nil {
-		fmt.Printf("❌ Failed to get context details: %v\n", err)
-		return
-	}
-	selectedCluster.Profile = profile
-	selectedCluster.Region = region
-	selectedCluster.ClusterName = clusterName
-
-	// If the cluster is already active, check if we need to assume the role
-	if selectedCluster.Current {
-		fmt.Println("🎉 This cluster is already active!")
-
-		// If there is an associated profile, check if we need to assume the role
-		if selectedCluster.Profile != "" {
-			fmt.Printf("🔍 Checking if we need to assume role for profile: %s\n", selectedCluster.Profile)
-			if err := assumeRoleForCluster(ctx, selectedCluster); err != nil {
-				fmt.Printf("❌ Failed to assume role: %v\n", err)
-				return
-			}
-		}
-		return
+		return err
 	}
 
-	// If there is an associated profile, assume the role before switching context
-	if selectedCluster.Profile != "" {
-		fmt.Printf("🔐 Assuming role for profile: %s\n", selectedCluster.Profile)
-		if err := assumeRoleForCluster(ctx, selectedCluster); err != nil {
-			fmt.Printf("❌ Failed to assume role: %v\n", err)
-			return
+	profile, _, _, err := services_kubernetes.GetKubernetesContextDetails(cmd.Context(), cluster.Name)
+	if err != nil {
+		return err
+	}
+
+	if profile != "" {
+		if err := controllers.Login(cmd.Context(), profile, true); err != nil {
+			return err
 		}
 	}
 
-	// Cambiar al cluster seleccionado
-	fmt.Println("🔄 Switching to cluster context...")
-	if err := services_kubernetes.SwitchToContext(selectedCluster.Name); err != nil {
-		fmt.Printf("❌ Failed to switch to cluster: %v\n", err)
-		return
+	if cluster.Current {
+		ui.Done("Already on %s", ui.Strong.Render(cluster.Name))
+		return nil
 	}
 
-	fmt.Printf("🎉 Successfully switched to cluster: %s\n", selectedCluster.Name)
-	fmt.Println("💡 You can now use kubectl commands with this cluster")
-}
-
-// assumeRoleForCluster assumes the AWS role for the given cluster
-func assumeRoleForCluster(ctx context.Context, cluster *services_kubernetes.ClusterContext) error {
-	if cluster.Profile == "" {
-		return fmt.Errorf("no profile associated with cluster %s", cluster.Name)
+	if err := services_kubernetes.SwitchToContext(cmd.Context(), cluster.Name); err != nil {
+		return err
 	}
 
-	// Resolve SSO configuration (can come from source profile for assume role)
-	ssoRegion, ssoStartURL, err := services_aws.ResolveSSOConfiguration(cluster.Profile)
-	if err != nil {
-		return fmt.Errorf("error resolving SSO configuration for profile %s: %w", cluster.Profile, err)
-	}
-
-	// Perform login with the profile using retry
-	if err := controllers.AttemptLoginWithRetry(ctx, cluster.Profile, true, ssoRegion, ssoStartURL); err != nil {
-		return fmt.Errorf("failed to login with profile %s: %w", cluster.Profile, err)
-	}
-
-	fmt.Printf("✅ Successfully assumed role for profile: %s\n", cluster.Profile)
+	ui.Done("Switched to %s", ui.Strong.Render(cluster.Name))
 	return nil
-}
-
-// interactiveClusterSelectorWithTimeout wraps the cluster selector with timeout handling
-func interactiveClusterSelectorWithTimeout(ctx context.Context) (*services_kubernetes.ClusterContext, error) {
-	// Create a channel to receive the result
-	resultChan := make(chan *services_kubernetes.ClusterContext, 1)
-	errorChan := make(chan error, 1)
-
-	// Run the selector in a goroutine
-	go func() {
-		cluster, err := animation.InteractiveClusterSelector()
-		if err != nil {
-			errorChan <- err
-			return
-		}
-		resultChan <- cluster
-	}()
-
-	// Wait for either result or timeout
-	select {
-	case cluster := <-resultChan:
-		return cluster, nil
-	case err := <-errorChan:
-		return nil, err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }

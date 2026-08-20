@@ -4,68 +4,60 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/andresgarcia29/ark-cli/logs"
+	"strings"
+	"time"
 )
 
-// CleanKubeconfig cleans the ~/.kube/config file
-func CleanKubeconfig(kubeconfigPath string) error {
-	logger := logs.GetLogger()
-	logger.Infow("Starting kubeconfig cleanup", "path", kubeconfigPath)
+// ExpandPath resolves a leading ~ against the user's home directory. Flags
+// carry paths as typed, and os.Stat does not expand them.
+func ExpandPath(path string) (string, error) {
+	if path == "" {
+		path = "~/.kube/config"
+	}
+	if !strings.HasPrefix(path, "~") {
+		return filepath.Clean(path), nil
+	}
 
-	homeDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		logger.Errorw("Failed to get home directory", "error", err)
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~")), nil
+}
+
+// BackupKubeconfig moves the current kubeconfig aside under a timestamped
+// name and returns that path. It returns "" when there was nothing to back up.
+func BackupKubeconfig(kubeconfigPath string) (string, error) {
+	path, err := ExpandPath(kubeconfigPath)
+	if err != nil {
+		return "", err
 	}
 
-	if kubeconfigPath == "" {
-		kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
-		logger.Debugw("Using default kubeconfig path", "path", kubeconfigPath)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", nil
+	} else if err != nil {
+		return "", fmt.Errorf("failed to inspect %s: %w", path, err)
 	}
 
-	// Check if the file exists
-	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
-		// File does not exist, nothing to clean
-		logger.Infow("Kubeconfig file does not exist, nothing to clean", "path", kubeconfigPath)
-		fmt.Println("~/.kube/config does not exist, nothing to clean")
-		return nil
+	// Two runs in the same second must not overwrite each other's backup.
+	stamp := time.Now().Format("20060102-150405")
+	backup := fmt.Sprintf("%s.backup-%s", path, stamp)
+	for n := 2; ; n++ {
+		if _, err := os.Stat(backup); os.IsNotExist(err) {
+			break
+		}
+		backup = fmt.Sprintf("%s.backup-%s.%d", path, stamp, n)
 	}
 
-	logger.Debugw("Kubeconfig file exists, proceeding with cleanup", "path", kubeconfigPath)
-
-	// Create a backup of the file before deleting it (optional but recommended)
-	backupPath := kubeconfigPath + ".backup"
-	logger.Debugw("Creating backup of kubeconfig", "original", kubeconfigPath, "backup", backupPath)
-
-	if err := os.Rename(kubeconfigPath, backupPath); err != nil {
-		logger.Errorw("Failed to backup kubeconfig", "original", kubeconfigPath, "backup", backupPath, "error", err)
-		return fmt.Errorf("failed to backup kubeconfig: %w", err)
+	if err := os.Rename(path, backup); err != nil {
+		return "", fmt.Errorf("failed to back up %s: %w", path, err)
 	}
 
-	logger.Infow("Backup created successfully", "backup", backupPath)
-	fmt.Printf("Backup created at: %s\n", backupPath)
-
-	// Create ~/.kube directory if it doesn't exist
-	kubeDir := filepath.Join(homeDir, ".kube")
-	logger.Debugw("Ensuring .kube directory exists", "path", kubeDir)
-
-	if err := os.MkdirAll(kubeDir, 0700); err != nil {
-		logger.Errorw("Failed to create .kube directory", "path", kubeDir, "error", err)
-		return fmt.Errorf("failed to create .kube directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return backup, fmt.Errorf("failed to create %s: %w", filepath.Dir(path), err)
 	}
-
-	logger.Debugw(".kube directory ensured", "path", kubeDir)
-
-	// Create empty file
-	logger.Debugw("Creating empty kubeconfig file", "path", kubeconfigPath)
-
-	if err := os.WriteFile(kubeconfigPath, []byte(""), 0600); err != nil {
-		logger.Errorw("Failed to create empty kubeconfig", "path", kubeconfigPath, "error", err)
-		return fmt.Errorf("failed to create empty kubeconfig: %w", err)
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		return backup, fmt.Errorf("failed to create empty kubeconfig: %w", err)
 	}
-
-	logger.Infow("Kubeconfig cleaned successfully", "path", kubeconfigPath)
-	fmt.Println("✓ Kubeconfig cleaned successfully")
-	return nil
+	return backup, nil
 }

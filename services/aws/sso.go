@@ -12,13 +12,6 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-func StartSSOSession(ctx context.Context, region, startURL string) error {
-	logger := logs.GetLogger()
-	logger.Infow("Starting AWS SSO session", "region", region, "start_url", startURL)
-	fmt.Println("Starting AWS SSO session")
-	return nil
-}
-
 // StartDeviceAuthorization starts the device authorization flow
 func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clientSecret string) (*DeviceAuthorization, error) {
 	logger := logs.GetLogger()
@@ -32,7 +25,6 @@ func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clie
 
 	output, err := s.oidcClient.StartDeviceAuthorization(ctx, input)
 	if err != nil {
-		logger.Errorw("Failed to start device authorization", "client_id", clientID, "error", err)
 		return nil, fmt.Errorf("failed to start device authorization: %w", err)
 	}
 
@@ -49,60 +41,45 @@ func (s *SSOClient) StartDeviceAuthorization(ctx context.Context, clientID, clie
 	return auth, nil
 }
 
-// CreateToken polls until the user authorizes or the time expires
+// CreateToken polls AWS until the user approves the device authorization.
+// The caller's context bounds the wait, so an unapproved login cannot hang.
 func (s *SSOClient) CreateToken(ctx context.Context, clientID, clientSecret, deviceCode string, interval int32) (*TokenResponse, error) {
 	logger := logs.GetLogger()
-	logger.Debugw("Starting token creation polling", "client_id", clientID, "interval", interval)
+	if interval <= 0 {
+		interval = 5
+	}
+	wait := time.Duration(interval) * time.Second
 
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
-	pollCount := 0
+	input := &ssooidc.CreateTokenInput{
+		ClientId:     aws.String(clientID),
+		ClientSecret: aws.String(clientSecret),
+		DeviceCode:   aws.String(deviceCode),
+		GrantType:    aws.String("urn:ietf:params:oauth:grant-type:device_code"),
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Debug("Token creation cancelled by context")
-			return nil, ctx.Err()
-		case <-ticker.C:
-			pollCount++
-			logger.Debugw("Polling for token", "attempt", pollCount)
-
-			input := &ssooidc.CreateTokenInput{
-				ClientId:     aws.String(clientID),
-				ClientSecret: aws.String(clientSecret),
-				DeviceCode:   aws.String(deviceCode),
-				GrantType:    aws.String("urn:ietf:params:oauth:grant-type:device_code"),
-			}
-
-			output, err := s.oidcClient.CreateToken(ctx, input)
-			if err != nil {
-				// If it is AuthorizationPendingException, continue polling
-				if isAuthorizationPending(err) {
-					logger.Debugw("Authorization still pending", "attempt", pollCount)
-					continue
-				}
-				// If it is SlowDownException, increase the interval
-				if isSlowDown(err) {
-					newInterval := interval + 5
-					logger.Debugw("Rate limited, increasing interval", "old_interval", interval, "new_interval", newInterval)
-					ticker.Reset(time.Duration(newInterval) * time.Second)
-					continue
-				}
-				// Any other error, fail
-				logger.Errorw("Failed to create token", "attempt", pollCount, "error", err)
-				return nil, fmt.Errorf("failed to create token: %w", err)
-			}
-
-			// Token obtained successfully
-			token := &TokenResponse{
+	for attempt := 1; ; attempt++ {
+		output, err := s.oidcClient.CreateToken(ctx, input)
+		switch {
+		case err == nil:
+			logger.Debugw("token created", "attempts", attempt)
+			return &TokenResponse{
 				AccessToken:  aws.ToString(output.AccessToken),
 				ExpiresIn:    output.ExpiresIn,
 				TokenType:    aws.ToString(output.TokenType),
 				RefreshToken: aws.ToString(output.RefreshToken),
-			}
+			}, nil
+		case isAuthorizationPending(err):
+			// Expected until the user finishes approving in the browser.
+		case isSlowDown(err):
+			wait += 5 * time.Second
+		default:
+			return nil, fmt.Errorf("failed to create token: %w", err)
+		}
 
-			logger.Infow("Token created successfully", "attempts", pollCount, "expires_in", token.ExpiresIn)
-			return token, nil
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("authorization was not completed in time: %w", ctx.Err())
 		}
 	}
 }

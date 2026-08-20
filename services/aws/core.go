@@ -30,7 +30,6 @@ func NewSSOClient(ctx context.Context, region, startURL string) (*SSOClient, err
 		config.WithCredentialsProvider(aws.AnonymousCredentials{}),
 	)
 	if err != nil {
-		logger.Errorw("Failed to load SDK config", "region", region, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 
@@ -58,13 +57,12 @@ func (s *SSOClient) RegisterClient(ctx context.Context) (*ClientRegistration, er
 	logger.Debug("Registering client with AWS SSO")
 
 	input := &ssooidc.RegisterClientInput{
-		ClientName: aws.String("x-cli"),
+		ClientName: aws.String("ark-cli"),
 		ClientType: aws.String("public"),
 	}
 
 	output, err := s.oidcClient.RegisterClient(ctx, input)
 	if err != nil {
-		logger.Errorw("Failed to register client", "error", err)
 		return nil, fmt.Errorf("failed to register client: %w", err)
 	}
 
@@ -179,7 +177,6 @@ func NewEKSClient(ctx context.Context, region, profile string) (*EKSClient, erro
 		config.WithSharedConfigProfile(profile),
 	)
 	if err != nil {
-		logger.Errorw("Failed to load SDK config for EKS client", "region", region, "profile", profile, "error", err)
 		return nil, fmt.Errorf("unable to load SDK config: %w", err)
 	}
 

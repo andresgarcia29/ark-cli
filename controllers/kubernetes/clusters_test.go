@@ -1,615 +1,104 @@
 package controllers
 
 import (
-	"errors"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
-
-	services_aws "github.com/andresgarcia29/ark-cli/services/aws"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestUpdateKubeconfigForCluster(t *testing.T) {
-	tests := []struct {
-		name             string
-		cluster          services_aws.EKSCluster
-		replaceProfile   string
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name: "valid cluster without replace profile",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "test-profile",
-			},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "valid cluster with replace profile",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "original-profile",
-			},
-			replaceProfile:   "new-profile",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "cluster with empty name",
-			cluster: services_aws.EKSCluster{
-				Name:      "",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "test-profile",
-			},
-			replaceProfile:   "",
-			expectedError:    true,
-			expectedErrorMsg: "failed to update kubeconfig for cluster",
-		},
-		{
-			name: "cluster with empty region",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "",
-				AccountID: "123456789012",
-				Profile:   "test-profile",
-			},
-			replaceProfile:   "",
-			expectedError:    true,
-			expectedErrorMsg: "failed to update kubeconfig for cluster",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// We can't easily test the full function without mocking external dependencies
-			// but we can test the parameter handling and validation logic
-
-			// Test parameter validation
-			if tt.cluster.Name == "" || tt.cluster.Region == "" {
-				// Simulate the error that would occur
-				err := errors.New("failed to update kubeconfig for cluster " + tt.cluster.Name + ": invalid parameters")
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "failed to update kubeconfig for cluster")
-			} else {
-				// Test successful case
-				cluster := tt.cluster
-				if tt.replaceProfile != "" {
-					cluster.Profile = tt.replaceProfile
-				}
-
-				// Verify the cluster was modified correctly
-				if tt.replaceProfile != "" {
-					assert.Equal(t, tt.replaceProfile, cluster.Profile)
-				} else {
-					assert.Equal(t, tt.cluster.Profile, cluster.Profile)
-				}
-			}
-		})
+func requireKubectl(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not installed")
 	}
 }
 
-func TestUpdateKubeconfigForAllClusters(t *testing.T) {
-	tests := []struct {
-		name             string
-		clusters         []services_aws.EKSCluster
-		replaceProfile   string
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name:             "empty clusters list",
-			clusters:         []services_aws.EKSCluster{},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "single cluster",
-			clusters: []services_aws.EKSCluster{
-				{
-					Name:      "cluster-1",
-					Region:    "us-west-2",
-					AccountID: "123456789012",
-					Profile:   "profile-1",
-				},
-			},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "multiple clusters",
-			clusters: []services_aws.EKSCluster{
-				{
-					Name:      "cluster-1",
-					Region:    "us-west-2",
-					AccountID: "123456789012",
-					Profile:   "profile-1",
-				},
-				{
-					Name:      "cluster-2",
-					Region:    "us-east-1",
-					AccountID: "123456789012",
-					Profile:   "profile-2",
-				},
-			},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "clusters with replace profile",
-			clusters: []services_aws.EKSCluster{
-				{
-					Name:      "cluster-1",
-					Region:    "us-west-2",
-					AccountID: "123456789012",
-					Profile:   "original-profile",
-				},
-			},
-			replaceProfile:   "new-profile",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
+func kubeconfigFixture(cluster, ctxName string) string {
+	return `apiVersion: v1
+kind: Config
+clusters:
+- cluster: {server: https://` + cluster + `.example.com}
+  name: ` + cluster + `
+contexts:
+- context: {cluster: ` + cluster + `, user: ` + cluster + `}
+  name: ` + ctxName + `
+users:
+- name: ` + cluster + `
+  user: {token: t}
+`
+}
+
+// The merge must fold new clusters in without discarding contexts the user
+// already had, such as minikube or another cloud.
+func TestMergeKubeconfigsPreservesExistingContexts(t *testing.T) {
+	requireKubectl(t)
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "config")
+	if err := os.WriteFile(target, []byte(kubeconfigFixture("minikube", "minikube")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	incoming := filepath.Join(dir, "incoming.yaml")
+	if err := os.WriteFile(incoming, []byte(kubeconfigFixture("eks-prod", "eks-prod")), 0600); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test the function logic
-			if len(tt.clusters) == 0 {
-				// Should return early with no error
-				assert.NoError(t, nil)
-			} else {
-				// Test that each cluster would be processed
-				for _, cluster := range tt.clusters {
-					// Test parameter handling
-					if tt.replaceProfile != "" {
-						cluster.Profile = tt.replaceProfile
-					}
+	if err := mergeKubeconfigs(context.Background(), []string{incoming}, target); err != nil {
+		t.Fatalf("mergeKubeconfigs: %v", err)
+	}
 
-					// Verify cluster has required fields
-					assert.NotEmpty(t, cluster.Name)
-					assert.NotEmpty(t, cluster.Region)
-					assert.NotEmpty(t, cluster.AccountID)
-					assert.NotEmpty(t, cluster.Profile)
-				}
-			}
-		})
+	merged, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"minikube", "eks-prod"} {
+		if !strings.Contains(string(merged), want) {
+			t.Errorf("merged kubeconfig lost %q:\n%s", want, merged)
+		}
+	}
+
+	info, _ := os.Stat(target)
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("kubeconfig permissions = %o, want 600", perm)
 	}
 }
 
-func TestUpdateKubeconfigWithProgress(t *testing.T) {
-	tests := []struct {
-		name             string
-		clusters         []services_aws.EKSCluster
-		replaceProfile   string
-		expectedError    bool
-		expectedErrorMsg string
-	}{
-		{
-			name:             "empty clusters list",
-			clusters:         []services_aws.EKSCluster{},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "single cluster",
-			clusters: []services_aws.EKSCluster{
-				{
-					Name:      "cluster-1",
-					Region:    "us-west-2",
-					AccountID: "123456789012",
-					Profile:   "profile-1",
-				},
-			},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
-		{
-			name: "multiple clusters",
-			clusters: []services_aws.EKSCluster{
-				{
-					Name:      "cluster-1",
-					Region:    "us-west-2",
-					AccountID: "123456789012",
-					Profile:   "profile-1",
-				},
-				{
-					Name:      "cluster-2",
-					Region:    "us-east-1",
-					AccountID: "123456789012",
-					Profile:   "profile-2",
-				},
-			},
-			replaceProfile:   "",
-			expectedError:    false,
-			expectedErrorMsg: "",
-		},
+func TestMergeKubeconfigsCreatesMissingTarget(t *testing.T) {
+	requireKubectl(t)
+	dir := t.TempDir()
+
+	incoming := filepath.Join(dir, "incoming.yaml")
+	if err := os.WriteFile(incoming, []byte(kubeconfigFixture("eks-prod", "eks-prod")), 0600); err != nil {
+		t.Fatal(err)
 	}
+	target := filepath.Join(dir, "nested", "config")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test the function logic
-			if len(tt.clusters) == 0 {
-				// Should return early with no error
-				assert.NoError(t, nil)
-			} else {
-				// Test that each cluster would be processed
-				for _, cluster := range tt.clusters {
-					// Test parameter handling
-					if tt.replaceProfile != "" {
-						cluster.Profile = tt.replaceProfile
-					}
-
-					// Verify cluster has required fields
-					assert.NotEmpty(t, cluster.Name)
-					assert.NotEmpty(t, cluster.Region)
-					assert.NotEmpty(t, cluster.AccountID)
-					assert.NotEmpty(t, cluster.Profile)
-				}
-			}
-		})
+	if err := mergeKubeconfigs(context.Background(), []string{incoming}, target); err != nil {
+		t.Fatalf("mergeKubeconfigs: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || !strings.Contains(string(data), "eks-prod") {
+		t.Errorf("target not written: %v", err)
 	}
 }
 
-func TestUpdateKubeconfigForClusterParameters(t *testing.T) {
-	// Test parameter validation and handling
-	tests := []struct {
-		name           string
-		cluster        services_aws.EKSCluster
-		replaceProfile string
-	}{
-		{
-			name: "valid cluster",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "test-profile",
-			},
-			replaceProfile: "",
-		},
-		{
-			name: "cluster with replace profile",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "original-profile",
-			},
-			replaceProfile: "new-profile",
-		},
+func TestFirstLine(t *testing.T) {
+	cases := map[string]string{
+		"boom\ntrace\nmore": "boom",
+		"  single  ":        "single",
+		"":                  "aws eks update-kubeconfig failed",
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test parameter handling
-			cluster := tt.cluster
-			if tt.replaceProfile != "" {
-				cluster.Profile = tt.replaceProfile
-			}
-
-			// Verify parameters are properly handled
-			assert.Equal(t, tt.cluster.Name, cluster.Name)
-			assert.Equal(t, tt.cluster.Region, cluster.Region)
-			assert.Equal(t, tt.cluster.AccountID, cluster.AccountID)
-
-			if tt.replaceProfile != "" {
-				assert.Equal(t, tt.replaceProfile, cluster.Profile)
-			} else {
-				assert.Equal(t, tt.cluster.Profile, cluster.Profile)
-			}
-		})
+	for in, want := range cases {
+		if got := firstLine(in); got != want {
+			t.Errorf("firstLine(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
-func TestUpdateKubeconfigForAllClustersErrorHandling(t *testing.T) {
-	// Test error handling patterns
-	tests := []struct {
-		name        string
-		errorType   string
-		errorMsg    string
-		expectedMsg string
-	}{
-		{
-			name:        "cluster configuration error",
-			errorType:   "config",
-			errorMsg:    "failed to update kubeconfig",
-			expectedMsg: "failed to update kubeconfig for cluster test-cluster: failed to update kubeconfig",
-		},
-		{
-			name:        "all clusters failed",
-			errorType:   "all_failed",
-			errorMsg:    "configuration failed for all clusters",
-			expectedMsg: "configuration failed for all 2 clusters",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test error message formatting logic
-			var actualMsg string
-			switch tt.errorType {
-			case "config":
-				actualMsg = "failed to update kubeconfig for cluster test-cluster: " + tt.errorMsg
-			case "all_failed":
-				actualMsg = "configuration failed for all 2 clusters"
-			}
-
-			assert.Equal(t, tt.expectedMsg, actualMsg)
-		})
-	}
-}
-
-func TestUpdateKubeconfigWithProgressErrorHandling(t *testing.T) {
-	// Test error handling patterns
-	tests := []struct {
-		name        string
-		errorType   string
-		errorMsg    string
-		expectedMsg string
-	}{
-		{
-			name:        "some clusters failed",
-			errorType:   "some_failed",
-			errorMsg:    "some clusters failed to configure",
-			expectedMsg: "some clusters failed to configure (1/2)",
-		},
-		{
-			name:        "all clusters failed",
-			errorType:   "all_failed",
-			errorMsg:    "configuration failed for all clusters",
-			expectedMsg: "configuration failed for all 2 clusters",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test error message formatting logic
-			var actualMsg string
-			switch tt.errorType {
-			case "some_failed":
-				actualMsg = "some clusters failed to configure (1/2)"
-			case "all_failed":
-				actualMsg = "configuration failed for all 2 clusters"
-			}
-
-			assert.Equal(t, tt.expectedMsg, actualMsg)
-		})
-	}
-}
-
-func TestUpdateKubeconfigForClusterCommand(t *testing.T) {
-	// Test the command that would be executed
-	tests := []struct {
-		name           string
-		cluster        services_aws.EKSCluster
-		replaceProfile string
-		expectedCmd    []string
-	}{
-		{
-			name: "valid cluster without replace profile",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "test-profile",
-			},
-			replaceProfile: "",
-			expectedCmd: []string{
-				"aws", "eks", "update-kubeconfig",
-				"--name", "test-cluster",
-				"--region", "us-west-2",
-				"--profile", "test-profile",
-				"--alias", "test-cluster",
-			},
-		},
-		{
-			name: "valid cluster with replace profile",
-			cluster: services_aws.EKSCluster{
-				Name:      "test-cluster",
-				Region:    "us-west-2",
-				AccountID: "123456789012",
-				Profile:   "original-profile",
-			},
-			replaceProfile: "new-profile",
-			expectedCmd: []string{
-				"aws", "eks", "update-kubeconfig",
-				"--name", "test-cluster",
-				"--region", "us-west-2",
-				"--profile", "new-profile",
-				"--alias", "test-cluster",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test command construction logic
-			cluster := tt.cluster
-			if tt.replaceProfile != "" {
-				cluster.Profile = tt.replaceProfile
-			}
-
-			// Construct the command that would be executed
-			cmd := []string{
-				"aws", "eks", "update-kubeconfig",
-				"--name", cluster.Name,
-				"--region", cluster.Region,
-				"--profile", cluster.Profile,
-				"--alias", cluster.Name,
-			}
-
-			assert.Equal(t, tt.expectedCmd, cmd)
-		})
-	}
-}
-
-func TestUpdateKubeconfigForAllClustersStatistics(t *testing.T) {
-	// Test statistics tracking
-	tests := []struct {
-		name         string
-		clusters     []services_aws.EKSCluster
-		successCount int
-		failedCount  int
-		totalCount   int
-	}{
-		{
-			name: "all successful",
-			clusters: []services_aws.EKSCluster{
-				{Name: "cluster-1", Region: "us-west-2", AccountID: "123456789012", Profile: "profile-1"},
-				{Name: "cluster-2", Region: "us-east-1", AccountID: "123456789012", Profile: "profile-2"},
-			},
-			successCount: 2,
-			failedCount:  0,
-			totalCount:   2,
-		},
-		{
-			name: "some failed",
-			clusters: []services_aws.EKSCluster{
-				{Name: "cluster-1", Region: "us-west-2", AccountID: "123456789012", Profile: "profile-1"},
-				{Name: "cluster-2", Region: "us-east-1", AccountID: "123456789012", Profile: "profile-2"},
-			},
-			successCount: 1,
-			failedCount:  1,
-			totalCount:   2,
-		},
-		{
-			name: "all failed",
-			clusters: []services_aws.EKSCluster{
-				{Name: "cluster-1", Region: "us-west-2", AccountID: "123456789012", Profile: "profile-1"},
-				{Name: "cluster-2", Region: "us-east-1", AccountID: "123456789012", Profile: "profile-2"},
-			},
-			successCount: 0,
-			failedCount:  2,
-			totalCount:   2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test statistics calculation
-			totalCount := len(tt.clusters)
-			successCount := tt.successCount
-			failedCount := tt.failedCount
-
-			assert.Equal(t, tt.totalCount, totalCount)
-			assert.Equal(t, tt.successCount, successCount)
-			assert.Equal(t, tt.failedCount, failedCount)
-			assert.Equal(t, totalCount, successCount+failedCount)
-		})
-	}
-}
-
-func TestUpdateKubeconfigWithProgressUpdateFunction(t *testing.T) {
-	// Test the update function that would be passed to ShowProgressBar
-	tests := []struct {
-		name     string
-		item     string
-		err      error
-		expected string
-	}{
-		{
-			name:     "successful update",
-			item:     "cluster-1 (us-west-2)",
-			err:      nil,
-			expected: "cluster-1 (us-west-2)",
-		},
-		{
-			name:     "failed update",
-			item:     "cluster-2 (us-east-1)",
-			err:      errors.New("configuration failed"),
-			expected: "cluster-2 (us-east-1)",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test the update function logic
-			updateFunc := func(item string, err error) {
-				assert.Equal(t, tt.expected, item)
-				if tt.err != nil {
-					assert.Error(t, err)
-				} else {
-					assert.NoError(t, err)
-				}
-			}
-
-			// Call the update function
-			updateFunc(tt.item, tt.err)
-		})
-	}
-}
-
-func TestUpdateKubeconfigForClusterFunctionSignature(t *testing.T) {
-	// Test that the function has the expected signature
-	cluster := services_aws.EKSCluster{
-		Name:      "test-cluster",
-		Region:    "us-west-2",
-		AccountID: "123456789012",
-		Profile:   "test-profile",
-	}
-	replaceProfile := "new-profile"
-
-	// Test that all parameters are of the expected types
-	assert.IsType(t, services_aws.EKSCluster{}, cluster)
-	assert.IsType(t, "", replaceProfile)
-
-	// Test that the function would accept these parameters
-	_ = func(cluster services_aws.EKSCluster, replaceProfile string) error {
-		return nil
-	}
-}
-
-func TestUpdateKubeconfigForAllClustersFunctionSignature(t *testing.T) {
-	// Test that the function has the expected signature
-	clusters := []services_aws.EKSCluster{
-		{
-			Name:      "cluster-1",
-			Region:    "us-west-2",
-			AccountID: "123456789012",
-			Profile:   "profile-1",
-		},
-	}
-	replaceProfile := "new-profile"
-
-	// Test that all parameters are of the expected types
-	assert.IsType(t, []services_aws.EKSCluster{}, clusters)
-	assert.IsType(t, "", replaceProfile)
-
-	// Test that the function would accept these parameters
-	_ = func(clusters []services_aws.EKSCluster, replaceProfile string) error {
-		return nil
-	}
-}
-
-func TestUpdateKubeconfigWithProgressFunctionSignature(t *testing.T) {
-	// Test that the function has the expected signature
-	clusters := []services_aws.EKSCluster{
-		{
-			Name:      "cluster-1",
-			Region:    "us-west-2",
-			AccountID: "123456789012",
-			Profile:   "profile-1",
-		},
-	}
-	replaceProfile := "new-profile"
-
-	// Test that all parameters are of the expected types
-	assert.IsType(t, []services_aws.EKSCluster{}, clusters)
-	assert.IsType(t, "", replaceProfile)
-
-	// Test that the function would accept these parameters
-	_ = func(clusters []services_aws.EKSCluster, replaceProfile string) error {
-		return nil
+func TestSanitise(t *testing.T) {
+	if got := sanitise("1234/us-west-2/prod cluster"); strings.ContainsAny(got, "/ ") {
+		t.Errorf("sanitise left a path separator: %q", got)
 	}
 }
