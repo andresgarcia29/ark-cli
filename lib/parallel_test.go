@@ -197,3 +197,21 @@ func TestMapConcurrentHonoursCancellation(t *testing.T) {
 		t.Error("cancellation produced no errors")
 	}
 }
+
+func TestMapConcurrentOnDoneFiresOncePerKey(t *testing.T) {
+	var calls atomic.Int64
+	l := Limits{MaxWorkers: 2, Timeout: time.Second, Rate: 100, MaxRetries: 2, RetryDelay: time.Millisecond}
+	l.OnDone = func() { calls.Add(1) }
+
+	_, errs := MapConcurrent(context.Background(), []string{"a", "b"}, l,
+		func(ctx context.Context, key string) (int, error) {
+			return 0, errors.New("always fails")
+		})
+
+	if len(errs) != 2 {
+		t.Fatalf("errs = %d, want 2", len(errs))
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("OnDone called %d times, want 2 (once per key, not per retry)", got)
+	}
+}

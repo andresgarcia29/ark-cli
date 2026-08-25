@@ -17,6 +17,10 @@ type Limits struct {
 	Rate       rate.Limit // requests per second across all workers
 	MaxRetries int
 	RetryDelay time.Duration
+
+	// OnDone, when set, is called once per key after all its attempts finish,
+	// so retries do not inflate a progress count.
+	OnDone func()
 }
 
 // DefaultLimits is tuned to stay under AWS SSO/EKS request throttling.
@@ -96,6 +100,9 @@ func MapConcurrent[T any](
 
 	for i, key := range keys {
 		g.Go(func() error {
+			if l.OnDone != nil {
+				defer l.OnDone()
+			}
 			if err := limiter.Wait(gctx); err != nil {
 				failures[i] = fmt.Errorf("%s: %w", key, err)
 				return nil

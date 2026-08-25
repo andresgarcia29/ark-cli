@@ -14,8 +14,6 @@ import (
 // not a failure, and callers should exit quietly.
 var ErrCancelled = errors.New("selection cancelled")
 
-const visibleRows = 10
-
 // Item is one row of a picker.
 type Item struct {
 	// Title is the primary label and the main search target.
@@ -48,6 +46,13 @@ type picker struct {
 	chosen   int
 	done     bool
 	width    int
+	height   int
+}
+
+// rows is how many list rows fit on screen, leaving room for the heading, the
+// search line, the selected row's detail and the two overflow hints.
+func (p *picker) rows() int {
+	return min(max(p.height-6, 3), 20)
 }
 
 func newPicker(heading string, items []Item) *picker {
@@ -55,7 +60,7 @@ func newPicker(heading string, items []Item) *picker {
 		items[i].prepare()
 	}
 
-	p := &picker{heading: heading, items: items, chosen: -1, width: ui.Width()}
+	p := &picker{heading: heading, items: items, chosen: -1, width: ui.Width(), height: 24}
 	p.filter()
 	for n, idx := range p.filtered {
 		if items[idx].Marked {
@@ -86,8 +91,8 @@ func (p *picker) scroll() {
 	if p.cursor < p.offset {
 		p.offset = p.cursor
 	}
-	if p.cursor >= p.offset+visibleRows {
-		p.offset = p.cursor - visibleRows + 1
+	if p.cursor >= p.offset+p.rows() {
+		p.offset = p.cursor - p.rows() + 1
 	}
 	if p.offset < 0 {
 		p.offset = 0
@@ -101,7 +106,8 @@ func (p *picker) Init() tea.Cmd { return nil }
 func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		p.width = msg.Width
+		p.width, p.height = msg.Width, msg.Height
+		p.scroll()
 		return p, nil
 
 	case tea.KeyPressMsg:
@@ -134,10 +140,10 @@ func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.move(1)
 			return p, nil
 		case tea.KeyPgUp:
-			p.move(-visibleRows)
+			p.move(-p.rows())
 			return p, nil
 		case tea.KeyPgDown:
-			p.move(visibleRows)
+			p.move(p.rows())
 			return p, nil
 		case tea.KeyHome:
 			p.move(-len(p.filtered))
@@ -195,9 +201,17 @@ func highlight(item Item, query string, base lipgloss.Style) string {
 		base.Render(item.Title[end:])
 }
 
+// altScreen keeps the picker in the alternate buffer so repaints never land in
+// the scrollback.
+func altScreen(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
 func (p *picker) View() tea.View {
 	if p.done {
-		return tea.NewView("")
+		return altScreen("")
 	}
 
 	var b strings.Builder
@@ -217,7 +231,7 @@ func (p *picker) View() tea.View {
 	if len(p.filtered) == 0 {
 		b.WriteString(ui.Warned.Render("  nothing matches " + p.query))
 		b.WriteString("\n")
-		return tea.NewView(b.String())
+		return altScreen(b.String())
 	}
 
 	if p.offset > 0 {
@@ -225,7 +239,7 @@ func (p *picker) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	end := min(p.offset+visibleRows, len(p.filtered))
+	end := min(p.offset+p.rows(), len(p.filtered))
 	for n := p.offset; n < end; n++ {
 		item := p.items[p.filtered[n]]
 		selected := n == p.cursor
@@ -261,7 +275,7 @@ func (p *picker) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	return tea.NewView(b.String())
+	return altScreen(b.String())
 }
 
 // Select renders an interactive picker and returns the chosen index.

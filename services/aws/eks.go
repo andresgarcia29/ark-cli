@@ -166,9 +166,10 @@ func GetClustersFromAllAccounts(ctx context.Context, regions []string, rolePrefi
 	sort.Strings(accountIDs)
 
 	totalAccounts.Store(int64(len(accountIDs)))
-	byAccount, errs := lib.MapConcurrent(ctx, accountIDs, lib.DefaultLimits(),
+	limits := lib.DefaultLimits()
+	limits.OnDone = func() { scannedAccounts.Add(1) }
+	byAccount, errs := lib.MapConcurrent(ctx, accountIDs, limits,
 		func(ctx context.Context, accountID string) ([]EKSCluster, error) {
-			defer scannedAccounts.Add(1)
 			return processAccount(ctx, accountID, selectedProfiles[accountID], regions)
 		})
 
