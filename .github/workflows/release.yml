@@ -46,13 +46,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create semantic version tag
         id: semver
         uses: ./.github/actions/semver-tag
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           default-bump: ${{ inputs.bump || 'patch' }}
           tag-prefix: 'v'
 
@@ -72,7 +72,7 @@ jobs:
       - name: Build and release
         uses: ./.github/actions/goreleaser-build
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
