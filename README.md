@@ -1,9 +1,20 @@
 # ark-cli
 
+[![ci](https://github.com/andresgarcia29/ark-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/andresgarcia29/ark-cli/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/andresgarcia29/ark-cli)](https://goreportcard.com/report/github.com/andresgarcia29/ark-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful command-line interface for AWS and Kubernetes operations, designed to streamline your cloud workflow.
+Log in to AWS SSO once and get every EKS cluster, across every account and region you can reach, into your kubeconfig in seconds.
+
+Built for engineers who work across dozens of AWS accounts: no more copy-pasting SSO URLs, hunting for the right role, or running `aws eks update-kubeconfig` cluster by cluster.
+
+## Quick start
+
+```bash
+ark aws sso --start-url https://your-org.awsapps.com/start   # one browser login
+ark k8s setup --regions us-east-1,us-west-2                   # discover every EKS cluster you can read
+ark k8s                                                       # pick a cluster and go
+```
 
 ## Features
 
