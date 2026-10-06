@@ -46,9 +46,14 @@ brew upgrade ark --cask
 sudo xattr -r -d com.apple.quarantine $(which ark)
 ```
 
-### Using Go [In Progress]
+The release binaries are not notarized by Apple yet, so macOS quarantines them on download; the `xattr` line
+clears that flag. If you'd rather not, install from source with Go instead.
+
+### Using Go
+
 ```bash
 go install github.com/andresgarcia29/ark-cli@latest
+alias ark=ark-cli   # go install names the binary after the module
 ```
 
 ---
