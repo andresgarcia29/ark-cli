@@ -16,6 +16,8 @@ ark k8s setup --regions us-east-1,us-west-2                   # discover every E
 ark k8s                                                       # pick a cluster and go
 ```
 
+![ark k8s: filter and switch EKS clusters](docs/demo.gif)
+
 ## Features
 
 - **AWS Operations**: Login, SSO, and credential management
